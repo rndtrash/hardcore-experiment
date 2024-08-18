@@ -1,0 +1,8 @@
+name: HardcoreExperiment
+version: '1.0-SNAPSHOT'
+main: ru.teasanctuary.hardcore_experiment.HardcoreExperiment
+api-version: '1.21'
+prefix: HE
+authors: [ rndtrash ]
+description: A new way to experience the hardcore Minecraft.
+website: https://teasanctuary.ru
