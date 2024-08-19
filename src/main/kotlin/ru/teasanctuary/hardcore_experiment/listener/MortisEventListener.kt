@@ -1,6 +1,7 @@
 package ru.teasanctuary.hardcore_experiment.listener
 
 import com.destroystokyo.paper.event.player.PlayerPostRespawnEvent
+import com.destroystokyo.paper.event.player.PlayerStartSpectatingEntityEvent
 import net.kyori.adventure.text.minimessage.MiniMessage
 import org.bukkit.GameMode
 import org.bukkit.event.Cancellable
@@ -68,6 +69,7 @@ class MortisEventListener(private val plugin: HardcoreExperiment) : Listener {
         val player = event.player
         if (player.gameMode == GameMode.SPECTATOR && plugin.getPlayerState(player) == PlayerState.LimitedSpectator) {
             val newLocation = event.from.clone().setDirection(event.to.direction)
+            // TODO: вращение головой выглядит дёргано
             event.player.teleport(newLocation, PlayerTeleportEvent.TeleportCause.PLUGIN)
             //event.isCancelled = true
         }
@@ -76,6 +78,11 @@ class MortisEventListener(private val plugin: HardcoreExperiment) : Listener {
     @EventHandler
     fun onPlayerTeleport(event: PlayerTeleportEvent) {
         if (event.cause == PlayerTeleportEvent.TeleportCause.SPECTATE) cancelForLimitedSpectators(event)
+    }
+
+    @EventHandler
+    fun onPlayerStartSpectatingEntity(event: PlayerStartSpectatingEntityEvent) {
+        cancelForLimitedSpectators(event)
     }
 
     @EventHandler
