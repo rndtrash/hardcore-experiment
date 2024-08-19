@@ -18,7 +18,8 @@ class WorldEventListener(private val plugin: HardcoreExperiment) : Listener {
 
     @EventHandler
     fun onWorldSave(event: WorldSaveEvent) {
-        // TODO: playerStateChangeQueue and nkResurrectQueue
         plugin.logger.log(Level.INFO, "World data has been saved!")
+
+        if (event.world == plugin.defaultWorld) plugin.saveWorldStorage()
     }
 }

@@ -35,7 +35,7 @@ class HardcoreExperiment : JavaPlugin() {
         /**
          * Преобразование реальных секунд к игровым.
          *
-         * @sample World.getGameTime / REAL_SECONDS_TO_GAME_TIME
+         * Пример: World.getGameTime / REAL_SECONDS_TO_GAME_TIME
          */
         const val REAL_SECONDS_TO_GAME_TIME: Long = 20;
         private val mmListOfDeadPlayers = MiniMessage.miniMessage().deserialize("<b>Список мёртвых игроков:</b>")
@@ -76,11 +76,33 @@ class HardcoreExperiment : JavaPlugin() {
      */
     private val nkState: NamespacedKey = NamespacedKey(this, "state")
 
+    /**
+     * Разрешение на ручное изменение эпохи.
+     */
     private val permissionManualUpgrade = Permission("hardcore_experiment.manual_upgrade", PermissionDefault.OP)
+
+    /**
+     * Разрешение на бесплатное возрождение любого игрока вне зависимости от статуса окончательной смерти.
+     */
     private val permissionResurrect = Permission("hardcore_experiment.resurrect", PermissionDefault.OP)
 
+    private var _epoch: WorldEpoch = WorldEpoch.Coal
+
+    /**
+     * Текущая эпоха мира.
+     */
+    var epoch: WorldEpoch
+        get() = _epoch
+        set(e) = setWorldEpoch(defaultWorld, e)
+
+    /**
+     * Момент абсолютного игрового времени в тиках, когда наступила текущая эпоха.
+     */
+    var epochSince: Long = 0
+        private set
+
     // TODO: Очень хреновое решение, надо будет потом доработать
-    var _defaultWorld: World? = null
+    private var _defaultWorld: World? = null
     val defaultWorld: World
         get() = _defaultWorld!!
 
@@ -94,17 +116,6 @@ class HardcoreExperiment : JavaPlugin() {
     private var _hardcoreConfig: HardcoreExperimentConfig? = null;
     val hardcoreConfig
         get() = _hardcoreConfig!!
-
-    /**
-     * Инициализирует Permanent Data Container мира, если необходимо.
-     */
-    private fun initializeWorldStorage() {
-        var epoch = defaultWorld.persistentDataContainer.get(nkEpoch, WorldEpochDataType())
-        // Отсутствие эпохи принимаем как признак отсутствия остальных полей.
-        if (epoch != null) return
-
-        setWorldEpoch(defaultWorld, WorldEpoch.Coal)
-    }
 
     /**
      * Возвращает состояние игрока. null, если игрок ещё не играл на данном сервере.
@@ -157,9 +168,10 @@ class HardcoreExperiment : JavaPlugin() {
      * Убивает игрока, добавляя его в список возрождаемых игроков.
      */
     fun killPlayer(player: Player, location: Location) {
-        val (epoch, epochTimestamp) = getWorldEpoch(defaultWorld)
         deadPlayers[player.uniqueId] = DeadPlayerStatus(
-            defaultWorld.gameTime - epochTimestamp, epoch, defaultWorld.gameTime + hardcoreConfig.respawnTimeout * REAL_SECONDS_TO_GAME_TIME
+            defaultWorld.gameTime - epochSince,
+            epoch,
+            defaultWorld.gameTime + hardcoreConfig.respawnTimeout * REAL_SECONDS_TO_GAME_TIME
         )
 
         makePlayerSpectateLimited(player, location)
@@ -214,41 +226,40 @@ class HardcoreExperiment : JavaPlugin() {
     /**
      * Изменяет эпоху развития игрока, а также запоминает момент времени, в который эпоха поменялась.
      */
-    fun setWorldEpoch(world: World, epoch: WorldEpoch) {
-        world.persistentDataContainer.set(nkEpoch, WorldEpochDataType(), epoch)
-
-        val worldTime = world.gameTime
-        world.persistentDataContainer.set(nkEpochTimestamp, PersistentDataType.LONG, worldTime)
-
-        // На случай даунгрейда эпохи, времена достижения последующих эпох обнуляются.
-        // val epochOrdinal = epoch.ordinal
-        // epochHistory[epochOrdinal] = worldTime
-        // for (i in epochOrdinal + 1..<WorldEpoch.entries.size) {
-        // epochHistory[i] = -1
-        // }
-    }
-
-    fun getWorldEpochSince(world: World): Long {
-        return world.persistentDataContainer.getOrDefault(
-            nkEpochTimestamp, PersistentDataType.LONG, 0
-        )
-    }
-
-    fun getWorldEpoch(world: World): Pair<WorldEpoch, Long> {
-        var epoch = world.persistentDataContainer.get(nkEpoch, WorldEpochDataType())
-        if (epoch == null) {
-            epoch = WorldEpoch.Coal
-            setWorldEpoch(world, epoch)
-        }
-
-        return Pair(epoch, getWorldEpochSince(world))
+    private fun setWorldEpoch(world: World, epoch: WorldEpoch) {
+        _epoch = epoch
+        epochSince = world.gameTime
     }
 
     fun sendCurrentEpoch(sender: CommandSender): Int {
-        val epochPair = getWorldEpoch(defaultWorld)
-        sender.sendMessage("Текущая эпоха ${epochPair.first.name} длится ${(defaultWorld.gameTime - epochPair.second) / 20} секунд")
+        sender.sendMessage("Текущая эпоха ${epoch.name} длится ${(defaultWorld.gameTime - epochSince) / 20} секунд")
 
         return Command.SINGLE_SUCCESS
+    }
+
+    /**
+     * Загружает данные из Permanent Data Container мира или инициализирует их, если необходимо.
+     */
+    private fun loadWorldStorage() {
+        val dataEpoch = defaultWorld.persistentDataContainer.get(nkEpoch, WorldEpochDataType())
+        // Отсутствие эпохи принимаем как признак отсутствия остальных полей.
+        if (dataEpoch == null) {
+            epoch = WorldEpoch.Coal
+
+            saveWorldStorage()
+            return
+        }
+
+        _epoch = dataEpoch
+        epochSince = defaultWorld.persistentDataContainer.getOrDefault(nkEpochTimestamp, PersistentDataType.LONG, 0)
+    }
+
+    /**
+     * Сохраняет данные в Permanent Data Container мира.
+     */
+    fun saveWorldStorage() {
+        defaultWorld.persistentDataContainer.set(nkEpoch, WorldEpochDataType(), epoch)
+        defaultWorld.persistentDataContainer.set(nkEpochTimestamp, PersistentDataType.LONG, epochSince)
     }
 
     override fun onEnable() {
@@ -259,7 +270,7 @@ class HardcoreExperiment : JavaPlugin() {
         )
 
         _defaultWorld = Bukkit.getServer().worlds[0]
-        initializeWorldStorage()
+        loadWorldStorage()
 
         Bukkit.getPluginManager().addPermission(permissionManualUpgrade)
         Bukkit.getPluginManager().addPermission(permissionResurrect)
@@ -274,7 +285,7 @@ class HardcoreExperiment : JavaPlugin() {
                 .requires { source -> source.sender.hasPermission(permissionManualUpgrade) }
                 .then(Commands.argument("epoch", WorldEpochArgumentType()).executes { ctx ->
                     val epoch = ctx.getArgument("epoch", WorldEpoch::class.java)
-                    setWorldEpoch(defaultWorld, epoch)
+                    this.epoch = epoch
 
                     Command.SINGLE_SUCCESS
                 }).build(), "Изменить эпоху развития игрока вручную."
@@ -330,6 +341,8 @@ class HardcoreExperiment : JavaPlugin() {
     }
 
     override fun onDisable() {
+        saveWorldStorage()
+
         getConfig().set("hardcore-experiment", hardcoreConfig)
         saveConfig()
 

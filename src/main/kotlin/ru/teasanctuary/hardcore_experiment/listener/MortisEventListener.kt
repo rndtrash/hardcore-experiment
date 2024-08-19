@@ -27,9 +27,8 @@ class MortisEventListener(private val plugin: HardcoreExperiment) : Listener {
     @EventHandler
     fun onPlayerDeath(event: PlayerDeathEvent) {
         val player = event.player
-        val (epoch, epochSince) = plugin.getWorldEpoch(plugin.defaultWorld)
-        if (epoch.canRespawn()) {
-            val respawnCost = epoch.getRespawnCost(plugin.defaultWorld.gameTime - epochSince)
+        if (plugin.epoch.canRespawn()) {
+            val respawnCost = plugin.epoch.getRespawnCost(plugin.defaultWorld.gameTime - plugin.epochSince)
             if (respawnCost == null) {
                 // Воскрешение слишком дорогое, кидаем игрока в список мертвецов
                 plugin.makePlayerSpectate(player)
