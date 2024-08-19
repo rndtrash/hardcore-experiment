@@ -208,6 +208,8 @@ class HardcoreExperiment : JavaPlugin() {
             setPlayerState(player, PlayerState.Spectator)
             player.gameMode = GameMode.SPECTATOR
             player.teleport(player.world.spawnLocation, PlayerTeleportEvent.TeleportCause.PLUGIN)
+
+            deadPlayers.remove(player.uniqueId)
         } else {
             makeOfflinePlayerSpectate(player.uniqueId, player.world.spawnLocation)
         }
@@ -228,7 +230,7 @@ class HardcoreExperiment : JavaPlugin() {
      */
     fun processPlayerStateRequest(player: Player) {
         val playerUid = player.uniqueId
-        val request = playerStateChangeQueue[playerUid]
+        val request = playerStateChangeQueue.remove(playerUid)
         if (request != null) {
             when (request.state) {
                 PlayerState.Alive -> makePlayerAlive(player, request.location)
@@ -236,7 +238,6 @@ class HardcoreExperiment : JavaPlugin() {
                 PlayerState.Spectator -> makePlayerSpectate(player)
                 else -> TODO("Type not supported: ${request.state}")
             }
-            playerStateChangeQueue.remove(playerUid)
         }
     }
 
@@ -345,15 +346,37 @@ class HardcoreExperiment : JavaPlugin() {
                     if (ctx.source.sender is Player) makePlayerAlive(ctx.source.sender as Player, null)
 
                     Command.SINGLE_SUCCESS
-                }.then(Commands.argument("players", ArgumentTypes.player()).executes { ctx ->
-                    val playerSelector = ctx.getArgument("players", PlayerSelectorArgumentResolver::class.java)
-                    val players = playerSelector.resolve(ctx.source)
-                    if (players.isNotEmpty()) {
-                        makePlayerAlive(players[0], null)
-                    }
+                }.then(
+                    Commands.literal("name").then(Commands.argument("players", ArgumentTypes.player()).executes { ctx ->
+                        val playerSelector = ctx.getArgument("players", PlayerSelectorArgumentResolver::class.java)
+                        val players = playerSelector.resolve(ctx.source)
+                        if (players.isNotEmpty()) {
+                            makePlayerAlive(players[0], null)
+                        }
 
-                    Command.SINGLE_SUCCESS
-                }).build(), "Вручную возродить игрока."
+                        Command.SINGLE_SUCCESS
+                    })
+                ).then(
+                    Commands.literal("uuid")
+                        .then(Commands.argument("player_uuid", ArgumentTypes.uuid()).executes { ctx ->
+                            val uuid = ctx.getArgument("player_uuid", UUID::class.java)
+                            val offlinePlayer = Bukkit.getOfflinePlayer(uuid)
+                            if (!offlinePlayer.hasPlayedBefore()) {
+                                ctx.source.sender.sendMessage("Данный игрок никогда не играл на этом сервере.")
+                                return@executes Command.SINGLE_SUCCESS
+                            }
+
+                            if (offlinePlayer.isConnected) {
+                                val player = Bukkit.getPlayer(uuid)
+                                if (player != null && player.isValid) makePlayerAlive(player, null)
+                                else makeOfflinePlayerAlive(uuid, defaultWorld.spawnLocation)
+                            } else {
+                                makeOfflinePlayerAlive(uuid, defaultWorld.spawnLocation)
+                            }
+
+                            Command.SINGLE_SUCCESS
+                        })
+                ).build(), "Вручную возродить игрока."
             )
 
             commands.register(Commands.literal("he-resurrect").executes { ctx ->

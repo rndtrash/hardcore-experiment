@@ -57,10 +57,10 @@ class MortisEventListener(private val plugin: HardcoreExperiment) : Listener {
         if (event.cause == PlayerGameModeChangeEvent.Cause.COMMAND) {
             if (event.newGameMode == GameMode.SPECTATOR) plugin.makePlayerSpectate(event.player)
             else plugin.makePlayerAlive(event.player, null)
+        } else if (event.cause == PlayerGameModeChangeEvent.Cause.HARDCORE_DEATH) {
+            // Мы уже обрабатываем смерть игрока
+            if (plugin.getPlayerState(event.player) == PlayerState.Alive) event.isCancelled = true
         }
-        // else if (event.cause == PlayerGameModeChangeEvent.Cause.HARDCORE_DEATH) {
-        //     Мы уже обрабатываем смерть игрока
-        // }
     }
 
     @EventHandler
