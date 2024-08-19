@@ -25,5 +25,7 @@ class JoinEventListener(private val plugin: HardcoreExperiment) : Listener {
                 plugin.makePlayerSpectate(player)
             }
         }
+
+        plugin.processPlayerStateRequest(event.player)
     }
 }

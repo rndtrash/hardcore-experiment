@@ -80,18 +80,7 @@ class MortisEventListener(private val plugin: HardcoreExperiment) : Listener {
 
     @EventHandler
     fun onPlayerPostRespawn(event: PlayerPostRespawnEvent) {
-        val player = event.player
-        val playerUid = player.uniqueId
-        val request = plugin.playerStateChangeQueue[playerUid]
-        if (request != null) {
-            when (request.state) {
-                PlayerState.Alive -> plugin.makePlayerAlive(player, request.location)
-                PlayerState.LimitedSpectator -> plugin.makePlayerSpectateLimited(player, request.location)
-                PlayerState.Spectator -> plugin.makePlayerSpectate(player)
-                else -> TODO("Type not supported: ${request.state}")
-            }
-            plugin.playerStateChangeQueue.remove(playerUid)
-        }
+        plugin.processPlayerStateRequest(event.player)
     }
 
     /**

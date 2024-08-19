@@ -37,7 +37,7 @@ class HardcoreExperiment : JavaPlugin() {
          *
          * Пример: World.getGameTime / REAL_SECONDS_TO_GAME_TIME
          */
-        const val REAL_SECONDS_TO_GAME_TIME: Long = 20;
+        const val REAL_SECONDS_TO_GAME_TIME: Long = 20
         private val mmListOfDeadPlayers = MiniMessage.miniMessage().deserialize("<b>Список мёртвых игроков:</b>")
     }
 
@@ -56,11 +56,11 @@ class HardcoreExperiment : JavaPlugin() {
     private val nkEpochTimestamp: NamespacedKey = NamespacedKey(this, "epoch_timestamp")
 
     /**
-     * Ключ для хранения списка игроков, готовых к воскрешению, но ещё не присутствующих на сервере.
+     * Ключ для хранения списка игроков, готовых к воскрешению или умерщвлению, но ещё не присутствующих на сервере.
      *
      * Хранится на стороне мира.
      */
-    private val nkResurrectQueue: NamespacedKey = NamespacedKey(this, "resurrect_queue")
+    private val nkStateChangeQueue: NamespacedKey = NamespacedKey(this, "state_change_queue")
 
     /**
      * Ключ для хранения списка игроков, которых можно воскресить за плату.
@@ -113,7 +113,7 @@ class HardcoreExperiment : JavaPlugin() {
      */
     val deadPlayers = mutableMapOf<UUID, DeadPlayerStatus>()
 
-    private var _hardcoreConfig: HardcoreExperimentConfig? = null;
+    private var _hardcoreConfig: HardcoreExperimentConfig? = null
     val hardcoreConfig
         get() = _hardcoreConfig!!
 
@@ -224,6 +224,23 @@ class HardcoreExperiment : JavaPlugin() {
     }
 
     /**
+     * Обработать запрос на изменение состояния для живого игрока, если таковой имеется.
+     */
+    fun processPlayerStateRequest(player: Player) {
+        val playerUid = player.uniqueId
+        val request = playerStateChangeQueue[playerUid]
+        if (request != null) {
+            when (request.state) {
+                PlayerState.Alive -> makePlayerAlive(player, request.location)
+                PlayerState.LimitedSpectator -> makePlayerSpectateLimited(player, request.location)
+                PlayerState.Spectator -> makePlayerSpectate(player)
+                else -> TODO("Type not supported: ${request.state}")
+            }
+            playerStateChangeQueue.remove(playerUid)
+        }
+    }
+
+    /**
      * Изменяет эпоху развития игрока, а также запоминает момент времени, в который эпоха поменялась.
      */
     private fun setWorldEpoch(world: World, epoch: WorldEpoch) {
@@ -252,6 +269,20 @@ class HardcoreExperiment : JavaPlugin() {
 
         _epoch = dataEpoch
         epochSince = defaultWorld.persistentDataContainer.getOrDefault(nkEpochTimestamp, PersistentDataType.LONG, 0)
+
+        val deadPlayersList: List<DeadPlayerPair> = defaultWorld.persistentDataContainer.getOrDefault(
+            nkDeadPlayers, PersistentDataType.LIST.listTypeFrom(DeadPlayersListDataType()), listOf()
+        )
+        deadPlayersList.forEach { pair ->
+            deadPlayers[pair.player] = pair.status
+        }
+
+        val stateChangeQueue: List<StateChangePair> = defaultWorld.persistentDataContainer.getOrDefault(
+            nkStateChangeQueue, PersistentDataType.LIST.listTypeFrom(StateChangeQueueDataType()), listOf()
+        )
+        stateChangeQueue.forEach { pair ->
+            playerStateChangeQueue[pair.player] = pair.state
+        }
     }
 
     /**
@@ -260,6 +291,18 @@ class HardcoreExperiment : JavaPlugin() {
     fun saveWorldStorage() {
         defaultWorld.persistentDataContainer.set(nkEpoch, WorldEpochDataType(), epoch)
         defaultWorld.persistentDataContainer.set(nkEpochTimestamp, PersistentDataType.LONG, epochSince)
+
+        defaultWorld.persistentDataContainer.set(
+            nkDeadPlayers,
+            PersistentDataType.LIST.listTypeFrom(DeadPlayersListDataType()),
+            deadPlayers.map { pair -> DeadPlayerPair(pair.key, pair.value) }.toList()
+        )
+
+        defaultWorld.persistentDataContainer.set(
+            nkStateChangeQueue,
+            PersistentDataType.LIST.listTypeFrom(StateChangeQueueDataType()),
+            playerStateChangeQueue.map { pair -> StateChangePair(pair.key, pair.value) }.toList()
+        )
     }
 
     override fun onEnable() {
@@ -346,6 +389,6 @@ class HardcoreExperiment : JavaPlugin() {
         getConfig().set("hardcore-experiment", hardcoreConfig)
         saveConfig()
 
-        HandlerList.unregisterAll(this);
+        HandlerList.unregisterAll(this)
     }
 }
