@@ -22,6 +22,7 @@ import org.bukkit.permissions.PermissionDefault
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import ru.teasanctuary.hardcore_experiment.config.HardcoreExperimentConfig
+import ru.teasanctuary.hardcore_experiment.listener.EpochEventListener
 import ru.teasanctuary.hardcore_experiment.listener.JoinEventListener
 import ru.teasanctuary.hardcore_experiment.listener.MortisEventListener
 import ru.teasanctuary.hardcore_experiment.listener.WorldEventListener
@@ -54,6 +55,13 @@ class HardcoreExperiment : JavaPlugin() {
      * Хранится на стороне мира.
      */
     private val nkEpochTimestamp: NamespacedKey = NamespacedKey(this, "epoch_timestamp")
+
+    /**
+     * Ключ для хранения разрешённых эпох.
+     *
+     * Хранится на стороне мира.
+     */
+    private val nkEpochBitmap: NamespacedKey = NamespacedKey(this, "epoch_bitmap")
 
     /**
      * Ключ для хранения списка игроков, готовых к воскрешению или умерщвлению, но ещё не присутствующих на сервере.
@@ -100,6 +108,12 @@ class HardcoreExperiment : JavaPlugin() {
      */
     var epochSince: Long = 0
         private set
+
+    /**
+     * Эпохи, разрешённые для перехода.
+     */
+    private val epochBitmap: MutableList<Boolean> =
+        WorldEpoch.entries.map { epoch -> epoch == WorldEpoch.Coal }.toMutableList()
 
     // TODO: Очень хреновое решение, надо будет потом доработать
     private var _defaultWorld: World? = null
@@ -242,11 +256,42 @@ class HardcoreExperiment : JavaPlugin() {
     }
 
     /**
+     * Помечает эпоху как доступную для перехода. Если эпоха в аргументе находится после текущей эпохи,
+     * то текущая эпоха улучшится до тех пор, пока её следующий сосед не будет запрещён, либо пока эпохи не закончатся.
+     */
+    fun allowEpoch(epoch: WorldEpoch) {
+        val ordinal = epoch.ordinal
+        val currentOrdinal = this.epoch.ordinal
+        if (ordinal <= currentOrdinal) return
+
+        epochBitmap[ordinal] = true
+
+        var nextOrdinal = currentOrdinal + 1
+        while (nextOrdinal < WorldEpoch.entries.count() && epochBitmap[nextOrdinal]) {
+            nextOrdinal++
+        }
+        this.epoch = WorldEpoch.entries[nextOrdinal - 1]
+    }
+
+    /**
      * Изменяет эпоху развития игрока, а также запоминает момент времени, в который эпоха поменялась.
      */
     private fun setWorldEpoch(world: World, epoch: WorldEpoch) {
-        _epoch = epoch
-        epochSince = world.gameTime
+        if (_epoch != epoch) {
+            _epoch = epoch
+            epochSince = world.gameTime
+            var i = 0
+            while (i <= epoch.ordinal) {
+                epochBitmap[i] = true
+                i++
+            }
+
+            Bukkit.broadcast(
+                MiniMessage.miniMessage().deserialize(
+                    "Достигнута новая эпоха: <#5555ff>${epoch.name}</#5555ff>\n\nВозрождение " + (if (epoch.canRespawn()) "<#55ff55>РАЗРЕШЕНО</#55ff55>. Не забудьте обновить ваши <b>алтари</b>!" else "<#ff5555>ЗАПРЕЩЕНО</#ff5555>. Удачи!")
+                )
+            )
+        }
     }
 
     fun sendCurrentEpoch(sender: CommandSender): Int {
@@ -271,6 +316,14 @@ class HardcoreExperiment : JavaPlugin() {
         _epoch = dataEpoch
         epochSince = defaultWorld.persistentDataContainer.getOrDefault(nkEpochTimestamp, PersistentDataType.LONG, 0)
 
+        // Разрешаем эпоху угля по умолчанию
+        val _epochBitmap = defaultWorld.persistentDataContainer.getOrDefault(
+            nkEpochBitmap, PersistentDataType.LIST.listTypeFrom(
+                PersistentDataType.BOOLEAN
+            ), WorldEpoch.entries.map { epoch -> epoch == WorldEpoch.Coal }.toList()
+        )
+        _epochBitmap.forEachIndexed { index, b -> epochBitmap[index] = b }
+
         val deadPlayersList: List<DeadPlayerPair> = defaultWorld.persistentDataContainer.getOrDefault(
             nkDeadPlayers, PersistentDataType.LIST.listTypeFrom(DeadPlayersListDataType()), listOf()
         )
@@ -292,6 +345,9 @@ class HardcoreExperiment : JavaPlugin() {
     fun saveWorldStorage() {
         defaultWorld.persistentDataContainer.set(nkEpoch, WorldEpochDataType(), epoch)
         defaultWorld.persistentDataContainer.set(nkEpochTimestamp, PersistentDataType.LONG, epochSince)
+        defaultWorld.persistentDataContainer.set(
+            nkEpochBitmap, PersistentDataType.LIST.listTypeFrom(PersistentDataType.BOOLEAN), epochBitmap
+        )
 
         defaultWorld.persistentDataContainer.set(
             nkDeadPlayers,
@@ -322,6 +378,7 @@ class HardcoreExperiment : JavaPlugin() {
         Bukkit.getPluginManager().registerEvents(JoinEventListener(this), this)
         Bukkit.getPluginManager().registerEvents(MortisEventListener(this), this)
         Bukkit.getPluginManager().registerEvents(WorldEventListener(this), this)
+        Bukkit.getPluginManager().registerEvents(EpochEventListener(this), this)
 
         lifecycleManager.registerEventHandler(LifecycleEvents.COMMANDS, { event ->
             val commands = event.registrar()
