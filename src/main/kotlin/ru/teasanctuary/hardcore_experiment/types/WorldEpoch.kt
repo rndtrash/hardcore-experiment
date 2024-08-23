@@ -23,8 +23,9 @@ enum class WorldEpoch(val items: List<Material>) {
     Iron(
         listOf(
             Material.RAW_IRON,
-            Material.IRON_NUGGET,
-            Material.IRON_INGOT,
+            // Причина: может быть найден в сундуках данжей
+            // Material.IRON_NUGGET,
+            // Material.IRON_INGOT,
             Material.IRON_BLOCK,
             // Инструменты
             Material.SHIELD,
@@ -47,8 +48,9 @@ enum class WorldEpoch(val items: List<Material>) {
     Gold(
         listOf(
             Material.RAW_GOLD,
-            Material.GOLD_NUGGET,
-            Material.GOLD_INGOT,
+            // Причина: может быть найден в сундуках данжей
+            // Material.GOLD_NUGGET,
+            // Material.GOLD_INGOT,
             Material.GOLD_BLOCK,
             // Еда
             Material.GOLDEN_APPLE,
@@ -66,6 +68,8 @@ enum class WorldEpoch(val items: List<Material>) {
             Material.GOLDEN_CHESTPLATE,
             Material.GOLDEN_HELMET,
             Material.GOLDEN_LEGGINGS,
+            // Прочее
+            Material.POWERED_RAIL
         )
     ) {
         override fun getRespawnCost(epochDuration: Long): ItemStack? {
@@ -74,7 +78,8 @@ enum class WorldEpoch(val items: List<Material>) {
     },
     Diamond(
         listOf(
-            Material.DIAMOND,
+            // Причина: может быть найден в сундуках данжей
+            // Material.DIAMOND,
             Material.DIAMOND_BLOCK,
             // Инструменты
             Material.DIAMOND_AXE,
@@ -97,7 +102,9 @@ enum class WorldEpoch(val items: List<Material>) {
         listOf(
             Material.OBSIDIAN, Material.CRYING_OBSIDIAN,
             // Инструменты
-            Material.ENCHANTING_TABLE, Material.BEACON, Material.ENDER_CHEST
+            Material.ENCHANTING_TABLE, Material.BEACON, Material.ENDER_CHEST, Material.RESPAWN_ANCHOR,
+            // Прочее
+            Material.ENDER_EYE
         )
     ) {
         override fun getRespawnCost(epochDuration: Long): ItemStack? {
@@ -134,6 +141,11 @@ enum class WorldEpoch(val items: List<Material>) {
     };
 
     companion object {
+        /**
+         * Таблица принадлежности каждого предмета к эпохе. Формируется автоматически на основе всех эпох.
+         *
+         * @see WorldEpoch
+         */
         val itemToEpoch =
             EnumMap(WorldEpoch.entries.map { epoch -> epoch.items.associateWith { _ -> epoch } }.flatMap { it.entries }
                 .associate { it.toPair() })
