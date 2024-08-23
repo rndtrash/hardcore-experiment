@@ -42,8 +42,8 @@ class MortisEventListener(private val plugin: HardcoreExperiment) : Listener {
                 plugin.killPlayer(player, player.location)
                 player.sendMessage(
                     MiniMessage.miniMessage().deserialize(
-                        "<#ff5555><b>Вы умерли.</b></#ff5555> <#55ff55>Вас всё ещё можно возродить!</#55ff55>\n\n" + (if (respawnCost.amount == 0) "Для этого попросите кого-нибудь встать на алтарь и написать команду /he-resurrect ${player.name}"
-                        else "Для этого попросите кого-нибудь положить на алтарь предмет <lang:${respawnCost.type.translationKey()}> в количестве ${respawnCost.amount} и написать команду /he-resurrect ${player.name}") + "\n\n<#ffff55>На возрождение вам дано ${plugin.hardcoreConfig.respawnTimeout} секунд, поторопитесь!</#ffff55>"
+                        "<#ff5555><b>Вы умерли.</b></#ff5555> <#55ff55>Вас всё ещё можно возродить!</#55ff55>\n\n" + (if (respawnCost.amount == 0) "Для этого попросите кого-нибудь встать на алтарь"
+                        else "Для этого попросите кого-нибудь положить на алтарь предмет <lang:${respawnCost.type.translationKey()}> в количестве ${respawnCost.amount}") + " и написать команду <#55ff55><click:suggest_command:'/he-resurrect ${player.name}'>/he-resurrect ${player.name}</click></#55ff55>" + "\n\n<#ffff55>На возрождение вам дано ${plugin.hardcoreConfig.respawnTimeout} секунд, поторопитесь!</#ffff55>"
                     )
                 )
             }
