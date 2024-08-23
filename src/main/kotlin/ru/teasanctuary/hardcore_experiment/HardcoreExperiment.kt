@@ -21,6 +21,7 @@ import org.bukkit.permissions.Permission
 import org.bukkit.permissions.PermissionDefault
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
+import org.bukkit.scheduler.BukkitTask
 import ru.teasanctuary.hardcore_experiment.config.HardcoreExperimentConfig
 import ru.teasanctuary.hardcore_experiment.listener.EpochEventListener
 import ru.teasanctuary.hardcore_experiment.listener.JoinEventListener
@@ -120,16 +121,19 @@ class HardcoreExperiment : JavaPlugin() {
     val defaultWorld: World
         get() = _defaultWorld!!
 
-    val playerStateChangeQueue = mutableMapOf<UUID, PlayerStateChangeRequest>()
+    private val playerStateChangeQueue = mutableMapOf<UUID, PlayerStateChangeRequest>()
 
     /**
      * Список мёртвых игроков, которых можно возродить.
      */
-    val deadPlayers = mutableMapOf<UUID, DeadPlayerStatus>()
+    private val deadPlayers = mutableMapOf<UUID, DeadPlayerStatus>()
 
     private var _hardcoreConfig: HardcoreExperimentConfig? = null
     val hardcoreConfig
         get() = _hardcoreConfig!!
+
+    private var coalEpochTimer: BukkitTask? = null
+    private var deadPlayerTimers = mutableMapOf<UUID, BukkitTask>()
 
     /**
      * Возвращает состояние игрока. null, если игрок ещё не играл на данном сервере.
@@ -151,27 +155,56 @@ class HardcoreExperiment : JavaPlugin() {
     }
 
     /**
+     * Удаляет игрока со списка на возрождение, а также останавливает таймер.
+     */
+    private fun removeFromDead(playerId: UUID) {
+        deadPlayers.remove(playerId)
+        val timer = deadPlayerTimers.remove(playerId)
+        timer?.cancel()
+    }
+
+    /**
      * Оживляет игрока, если он "возродился" в наблюдателя и сейчас на сервере. В противном случае ставит в очередь.
-     *
-     * @see makeOfflinePlayerAlive
      */
     fun makePlayerAlive(player: Player, location: Location?) {
         val newLocation = location ?: player.world.spawnLocation
         if (player.isValid) {
-            setPlayerState(player, PlayerState.Alive)
-            player.gameMode = GameMode.SURVIVAL
-            player.teleport(newLocation, PlayerTeleportEvent.TeleportCause.PLUGIN)
-
-            deadPlayers.remove(player.uniqueId)
+            makeOnlinePlayerAlive(player, newLocation)
         } else {
             makeOfflinePlayerAlive(player.uniqueId, newLocation)
         }
+        removeFromDead(player.uniqueId)
     }
 
     /**
-     * Ставит игрока в очередь на воскрешение.
+     * Ставит в очередь игрока, не находящегося на сервере. В противном случае сразу же возрождает.
      */
-    fun makeOfflinePlayerAlive(playerId: UUID, location: Location) {
+    fun makePlayerAlive(playerId: UUID, location: Location?) {
+        val newLocation = location ?: defaultWorld.spawnLocation
+        val player = Bukkit.getPlayer(playerId)
+        if (player != null && player.isValid) {
+            makeOnlinePlayerAlive(player, newLocation)
+        } else {
+            makeOfflinePlayerAlive(playerId, newLocation)
+        }
+        removeFromDead(playerId)
+    }
+
+    /**
+     * Воскрешает игрока, находящегося на сервере.
+     */
+    private fun makeOnlinePlayerAlive(player: Player, location: Location) {
+        assert(player.isValid)
+
+        setPlayerState(player, PlayerState.Alive)
+        player.gameMode = GameMode.SURVIVAL
+        player.teleport(location, PlayerTeleportEvent.TeleportCause.PLUGIN)
+    }
+
+    /**
+     * Ставит игрока, вышедшего с сервера, в очередь на воскрешение.
+     */
+    private fun makeOfflinePlayerAlive(playerId: UUID, location: Location) {
         val player = Bukkit.getOfflinePlayer(playerId)
         assert(player.hasPlayedBefore())
 
@@ -182,11 +215,14 @@ class HardcoreExperiment : JavaPlugin() {
      * Убивает игрока, добавляя его в список возрождаемых игроков.
      */
     fun killPlayer(player: Player, location: Location) {
-        deadPlayers[player.uniqueId] = DeadPlayerStatus(
-            defaultWorld.gameTime - epochSince,
-            epoch,
-            defaultWorld.gameTime + hardcoreConfig.respawnTimeout * REAL_SECONDS_TO_GAME_TIME
+        assert(player.isValid)
+
+        val playerId = player.uniqueId
+        val timeout = hardcoreConfig.respawnTimeout * REAL_SECONDS_TO_GAME_TIME
+        deadPlayers[playerId] = DeadPlayerStatus(
+            defaultWorld.gameTime - epochSince, epoch, defaultWorld.gameTime + timeout
         )
+        startDeathTimer(playerId, timeout)
 
         makePlayerSpectateLimited(player, location)
     }
@@ -196,18 +232,36 @@ class HardcoreExperiment : JavaPlugin() {
      */
     fun makePlayerSpectateLimited(player: Player, location: Location) {
         if (player.isValid) {
-            setPlayerState(player, PlayerState.LimitedSpectator)
-            player.gameMode = GameMode.SPECTATOR
-            player.teleport(location, PlayerTeleportEvent.TeleportCause.PLUGIN)
+            makeOnlinePlayerSpectateLimited(player, location)
         } else {
             makeOfflinePlayerSpectateLimited(player.uniqueId, location)
         }
     }
 
     /**
+     * Делает игрока ограниченным наблюдателем (не дальше своего сундука с лутом).
+     */
+    fun makePlayerSpectateLimited(playerId: UUID, location: Location) {
+        val player = Bukkit.getPlayer(playerId)
+        if (player != null && player.isValid) {
+            makeOnlinePlayerSpectateLimited(player, location)
+        } else {
+            makeOfflinePlayerSpectateLimited(playerId, location)
+        }
+    }
+
+    private fun makeOnlinePlayerSpectateLimited(player: Player, location: Location) {
+        assert(player.isValid)
+
+        setPlayerState(player, PlayerState.LimitedSpectator)
+        player.gameMode = GameMode.SPECTATOR
+        player.teleport(location, PlayerTeleportEvent.TeleportCause.PLUGIN)
+    }
+
+    /**
      * Ставит игрока в очередь на ограниченное наблюдение.
      */
-    fun makeOfflinePlayerSpectateLimited(playerId: UUID, location: Location) {
+    private fun makeOfflinePlayerSpectateLimited(playerId: UUID, location: Location) {
         val player = Bukkit.getOfflinePlayer(playerId)
         assert(player.hasPlayedBefore())
 
@@ -219,20 +273,43 @@ class HardcoreExperiment : JavaPlugin() {
      */
     fun makePlayerSpectate(player: Player) {
         if (player.isValid) {
-            setPlayerState(player, PlayerState.Spectator)
-            player.gameMode = GameMode.SPECTATOR
-            player.teleport(player.world.spawnLocation, PlayerTeleportEvent.TeleportCause.PLUGIN)
-
-            deadPlayers.remove(player.uniqueId)
+            makeOnlinePlayerSpectate(player, player.world.spawnLocation)
         } else {
-            makeOfflinePlayerSpectate(player.uniqueId, player.world.spawnLocation)
+            makeOfflinePlayerSpectate(player.uniqueId, defaultWorld.spawnLocation)
         }
+
+        removeFromDead(player.uniqueId)
+    }
+
+    /**
+     * Делает игрока наблюдателем.
+     */
+    fun makePlayerSpectate(playerId: UUID) {
+        val player = Bukkit.getPlayer(playerId)
+        if (player != null && player.isValid) {
+            makeOnlinePlayerSpectate(player, player.world.spawnLocation)
+        } else {
+            makeOfflinePlayerSpectate(playerId, defaultWorld.spawnLocation)
+        }
+
+        removeFromDead(playerId)
     }
 
     /**
      * Ставит игрока в очередь на перманентное наблюдение.
      */
-    fun makeOfflinePlayerSpectate(playerId: UUID, location: Location) {
+    private fun makeOnlinePlayerSpectate(player: Player, location: Location) {
+        assert(player.isValid)
+
+        setPlayerState(player, PlayerState.Spectator)
+        player.gameMode = GameMode.SPECTATOR
+        player.teleport(player.world.spawnLocation, PlayerTeleportEvent.TeleportCause.PLUGIN)
+    }
+
+    /**
+     * Ставит игрока в очередь на перманентное наблюдение.
+     */
+    private fun makeOfflinePlayerSpectate(playerId: UUID, location: Location) {
         val player = Bukkit.getOfflinePlayer(playerId)
         assert(player.hasPlayedBefore())
 
@@ -423,13 +500,7 @@ class HardcoreExperiment : JavaPlugin() {
                                 return@executes Command.SINGLE_SUCCESS
                             }
 
-                            if (offlinePlayer.isConnected) {
-                                val player = Bukkit.getPlayer(uuid)
-                                if (player != null && player.isValid) makePlayerAlive(player, null)
-                                else makeOfflinePlayerAlive(uuid, defaultWorld.spawnLocation)
-                            } else {
-                                makeOfflinePlayerAlive(uuid, defaultWorld.spawnLocation)
-                            }
+                            makePlayerAlive(uuid, null)
 
                             Command.SINGLE_SUCCESS
                         })
