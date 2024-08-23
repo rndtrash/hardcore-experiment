@@ -333,6 +333,57 @@ class HardcoreExperiment : JavaPlugin() {
     }
 
     /**
+     * Запускает таймер для конкретного игрока.
+     */
+    private fun startDeathTimer(playerId: UUID, timeout: Long) {
+        assert(!deadPlayerTimers.contains(playerId))
+
+        deadPlayerTimers[playerId] = server.scheduler.runTaskLater(this, Runnable {
+            makePlayerSpectate(playerId)
+
+            Bukkit.broadcast(
+                MiniMessage.miniMessage().deserialize(
+                    "Игрока: <#55ff55>${Bukkit.getOfflinePlayer(playerId).name}</#55ff55> больше <#ff5555>НЕЛЬЗЯ ВОЗРОДИТЬ</#ff5555>.\n\n" + "Используйте алтари для возрождения тех, у кого ещё не истёк таймер. Список можно получить с помощью команды <#55ff55><click:run_command:'/he-resurrect'>/he-resurrect</click></#55ff55>"
+                )
+            )
+        }, timeout)
+    }
+
+    private fun handleCoalEpochTimer() {
+        if (epoch != WorldEpoch.Coal || coalEpochTimer != null) return
+
+        val nextEpoch = WorldEpoch.entries[WorldEpoch.Coal.ordinal + 1]
+        // Таймер уже истёк, настало время следующей эпохи
+        if (defaultWorld.gameTime - epochSince >= hardcoreConfig.coalEpochUpgradeTimer * REAL_SECONDS_TO_GAME_TIME) {
+            epoch = nextEpoch
+            return
+        }
+
+        coalEpochTimer = server.scheduler.runTaskLater(this, Runnable {
+            if (epoch == WorldEpoch.Coal) epoch = nextEpoch
+            coalEpochTimer = null
+        }, hardcoreConfig.coalEpochUpgradeTimer * REAL_SECONDS_TO_GAME_TIME)
+    }
+
+    /**
+     * Запускает таймеры для обновления эпохи угля и удаления игроков из списка на возрождение.
+     *
+     * Выполняется только при запуске сервера.
+     */
+    private fun initializeDeathTimers() {
+        val deadIterator = deadPlayers.iterator()
+        while (deadIterator.hasNext()) {
+            val (playerId, request) = deadIterator.next()
+            if (request.deadline <= defaultWorld.gameTime) {
+                deadIterator.remove()
+                continue
+            }
+
+            startDeathTimer(playerId, request.deadline - defaultWorld.gameTime)
+        }
+    }
+
+    /**
      * Помечает эпоху как доступную для перехода. Если эпоха в аргументе находится после текущей эпохи,
      * то текущая эпоха улучшится до тех пор, пока её следующий сосед не будет запрещён, либо пока эпохи не закончатся.
      */
@@ -368,6 +419,8 @@ class HardcoreExperiment : JavaPlugin() {
                     "Достигнута новая эпоха: <#5555ff>${epoch.name}</#5555ff>\n\nВозрождение " + (if (epoch.canRespawn()) "<#55ff55>РАЗРЕШЕНО</#55ff55>. Не забудьте обновить ваши <b>алтари</b>!" else "<#ff5555>ЗАПРЕЩЕНО</#ff5555>. Удачи!")
                 )
             )
+
+            handleCoalEpochTimer()
         }
     }
 
@@ -392,6 +445,7 @@ class HardcoreExperiment : JavaPlugin() {
 
         _epoch = dataEpoch
         epochSince = defaultWorld.persistentDataContainer.getOrDefault(nkEpochTimestamp, PersistentDataType.LONG, 0)
+        handleCoalEpochTimer()
 
         // Разрешаем эпоху угля по умолчанию
         val _epochBitmap = defaultWorld.persistentDataContainer.getOrDefault(
@@ -448,6 +502,7 @@ class HardcoreExperiment : JavaPlugin() {
 
         _defaultWorld = Bukkit.getServer().worlds[0]
         loadWorldStorage()
+        initializeDeathTimers()
 
         Bukkit.getPluginManager().addPermission(permissionManualUpgrade)
         Bukkit.getPluginManager().addPermission(permissionResurrect)
