@@ -3,21 +3,38 @@ package ru.teasanctuary.hardcore_experiment.types
 import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
 import java.util.*
+import kotlin.math.ceil
+import kotlin.math.pow
 
 enum class WorldEpoch(val items: List<Material>) {
     /**
      * Эпоха угля. Бесплатное возрождение, но длится ограниченное время.
      */
-    Coal(listOf()) {
+    Coal(listOf(Material.COAL, Material.COAL_BLOCK, Material.COAL_ORE)) {
         override fun getRespawnCost(epochDuration: Long): ItemStack? {
             return ItemStack.empty() // Бесплатный респаун
         }
 
     },
-    Copper(listOf(Material.RAW_COPPER, Material.COPPER_INGOT, Material.COPPER_ORE)) {
+    Copper(
+        listOf(
+            Material.RAW_COPPER,
+            Material.COPPER_INGOT,
+            Material.COPPER_ORE,
+            Material.COPPER_BLOCK,
+            Material.EXPOSED_COPPER,
+            Material.WEATHERED_COPPER,
+            Material.OXIDIZED_COPPER,
+            Material.WAXED_COPPER_BLOCK,
+            Material.WAXED_EXPOSED_COPPER,
+            Material.WAXED_WEATHERED_COPPER,
+            Material.WAXED_OXIDIZED_COPPER
+        )
+    ) {
         override fun getRespawnCost(epochDuration: Long): ItemStack? {
-            //return ItemStack(Material.COPPER_INGOT, maxOf(1, epochDuration))
-            return null
+            val days = maxOf(1, epochDuration / dayLength)
+            val count = ceil(days.toDouble().pow(1.2)).toInt()
+            return ItemStack.of(Material.COPPER_INGOT, count)
         }
     },
     Iron(
@@ -120,6 +137,7 @@ enum class WorldEpoch(val items: List<Material>) {
             Material.ANCIENT_DEBRIS,
             Material.NETHERITE_SCRAP,
             Material.NETHERITE_INGOT,
+            Material.NETHERITE_BLOCK,
             // Инструменты
             Material.NETHERITE_AXE,
             Material.NETHERITE_HOE,
@@ -141,6 +159,8 @@ enum class WorldEpoch(val items: List<Material>) {
     };
 
     companion object {
+        private val dayLength = 24000L
+
         /**
          * Таблица принадлежности каждого предмета к эпохе. Формируется автоматически на основе всех эпох.
          *
