@@ -1,7 +1,8 @@
 plugins {
-    kotlin("jvm") version "2.0.20-RC2"
+    kotlin("jvm") version "2.0.20"
     id("com.github.johnrengelman.shadow") version "8.1.1"
     id("xyz.jpenilla.run-paper") version "2.3.0"
+    id("io.papermc.paperweight.userdev") version "1.7.2"
 }
 
 group = "ru.teasanctuary"
@@ -20,6 +21,7 @@ repositories {
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT")
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+    paperweight.paperDevBundle("1.21.1-R0.1-SNAPSHOT")
 }
 
 val targetJavaVersion = 21
