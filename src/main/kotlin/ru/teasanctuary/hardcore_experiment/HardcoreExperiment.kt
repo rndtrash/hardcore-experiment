@@ -47,7 +47,7 @@ class HardcoreExperiment : JavaPlugin() {
     private val nkEpoch: NamespacedKey = NamespacedKey(this, "epoch")
 
     /**
-     * Ключ для хранения момента времени, когда мир перешёл в новую эпоху.
+     * Ключ для хранения момента времени, когда мир перешёл в текущую эпоху.
      *
      * Хранится на стороне мира.
      */
@@ -59,6 +59,13 @@ class HardcoreExperiment : JavaPlugin() {
      * Хранится на стороне мира.
      */
     private val nkEpochBitmap: NamespacedKey = NamespacedKey(this, "epoch_bitmap")
+
+    /**
+     * Ключ для хранения момента времени, когда мир должен перейти в следующую эпоху.
+     *
+     * Хранится на стороне мира.
+     */
+    private val nkNextEpochTimestamp: NamespacedKey = NamespacedKey(this, "next_epoch_timestamp")
 
     /**
      * Ключ для хранения списка игроков, готовых к воскрешению или умерщвлению, но ещё не присутствующих на сервере.
@@ -119,9 +126,7 @@ class HardcoreExperiment : JavaPlugin() {
         WorldEpoch.entries.map { epoch -> epoch == WorldEpoch.Coal }.toMutableList()
 
     // TODO: Очень хреновое решение, надо будет потом доработать
-    private var _defaultWorld: World? = null
-    val defaultWorld: World
-        get() = _defaultWorld!!
+    lateinit var defaultWorld: World
 
     private val playerStateChangeQueue = mutableMapOf<UUID, PlayerStateChangeRequest>()
 
@@ -133,6 +138,7 @@ class HardcoreExperiment : JavaPlugin() {
     lateinit var hardcoreConfig: HardcoreExperimentConfig
 
     private var coalEpochTimer: BukkitTask? = null
+    private var nextEpochTimer: BukkitTask? = null
     private var deadPlayerTimers = mutableMapOf<UUID, BukkitTask>()
 
     /**
@@ -357,6 +363,9 @@ class HardcoreExperiment : JavaPlugin() {
         }, timeout)
     }
 
+    /**
+     * Запускает таймер на переход из начальной эпохи в следующую. Работает только для эпохи угля.
+     */
     private fun handleCoalEpochTimer() {
         if (epoch != WorldEpoch.Coal || coalEpochTimer != null) return
 
@@ -371,6 +380,43 @@ class HardcoreExperiment : JavaPlugin() {
             if (epoch == WorldEpoch.Coal) epoch = nextEpoch
             coalEpochTimer = null
         }, hardcoreConfig.coalEpochUpgradeTimer * REAL_SECONDS_TO_GAME_TIME)
+    }
+
+    /**
+     * Запускает таймер на переход в следующую разрешённую эпоху.
+     *
+     * Работает для всех эпох, кроме самой первой (см. handleCoalEpochTimer) и самой последней (по очевидным причинам).
+     */
+    private fun handleNextEpochTimer() {
+        if (epoch == WorldEpoch.Coal || epoch.ordinal == WorldEpoch.entries.size - 1 || nextEpochTimer != null) return
+
+        val nextEpoch = WorldEpoch.entries[epoch.ordinal + 1]
+        // Переход на следующую эпоху пока что не дозволен
+        if (!epochBitmap[nextEpoch.ordinal]) return
+
+        val nextEpochDeadline =
+            defaultWorld.persistentDataContainer.getOrDefault(nkNextEpochTimestamp, PersistentDataType.LONG, -1)
+        // Если таймер был активен до выключения сервера, то восстанавливаемся
+        var delay = hardcoreConfig.epochUpgradeTimer * REAL_SECONDS_TO_GAME_TIME
+        if (nextEpochDeadline != -1L) {
+            delay = nextEpochDeadline - defaultWorld.gameTime
+        } else {
+            // Запоминаем на случай выключения сервера
+            defaultWorld.persistentDataContainer.set(
+                nkNextEpochTimestamp, PersistentDataType.LONG, defaultWorld.gameTime + delay
+            )
+        }
+
+        nextEpochTimer = server.scheduler.runTaskLater(this, Runnable {
+            // Сначала сбрасываем таймер
+            nextEpochTimer = null
+            defaultWorld.persistentDataContainer.set(
+                nkNextEpochTimestamp, PersistentDataType.LONG, -1
+            )
+
+            // Сеттер эпохи сам вызовет handleNextEpochTimer, если необходимо
+            epoch = nextEpoch
+        }, delay)
     }
 
     /**
@@ -406,12 +452,7 @@ class HardcoreExperiment : JavaPlugin() {
         if (epochBitmap[ordinal]) return false
 
         epochBitmap[ordinal] = true
-
-        var nextOrdinal = currentOrdinal + 1
-        while (nextOrdinal < WorldEpoch.entries.count() && epochBitmap[nextOrdinal]) {
-            nextOrdinal++
-        }
-        this.epoch = WorldEpoch.entries[nextOrdinal - 1]
+        handleNextEpochTimer()
         return true
     }
 
@@ -435,6 +476,7 @@ class HardcoreExperiment : JavaPlugin() {
             )
 
             handleCoalEpochTimer()
+            handleNextEpochTimer()
         }
     }
 
@@ -457,17 +499,19 @@ class HardcoreExperiment : JavaPlugin() {
             return
         }
 
+        // Загружаем worldEpochBitmap до обработки таймеров
+        val worldEpochBitmap = defaultWorld.persistentDataContainer.getOrDefault(nkEpochBitmap,
+            PersistentDataType.LIST.listTypeFrom(
+                PersistentDataType.BOOLEAN
+            ),
+            WorldEpoch.entries.map { epoch -> epoch == WorldEpoch.Coal || epoch == WorldEpoch.Invalid } // Разрешаем первые две эпохи по-умолчанию
+                .toList())
+        worldEpochBitmap.forEachIndexed { index, b -> epochBitmap[index] = b }
+
         _epoch = dataEpoch
         epochSince = defaultWorld.persistentDataContainer.getOrDefault(nkEpochTimestamp, PersistentDataType.LONG, 0)
         handleCoalEpochTimer()
-
-        // Разрешаем эпоху угля по умолчанию
-        val _epochBitmap = defaultWorld.persistentDataContainer.getOrDefault(
-            nkEpochBitmap, PersistentDataType.LIST.listTypeFrom(
-                PersistentDataType.BOOLEAN
-            ), WorldEpoch.entries.map { epoch -> epoch == WorldEpoch.Coal }.toList()
-        )
-        _epochBitmap.forEachIndexed { index, b -> epochBitmap[index] = b }
+        handleNextEpochTimer()
 
         val deadPlayersList: List<DeadPlayerPair> = defaultWorld.persistentDataContainer.getOrDefault(
             nkDeadPlayers, PersistentDataType.LIST.listTypeFrom(DeadPlayersListDataType()), listOf()
@@ -534,6 +578,8 @@ class HardcoreExperiment : JavaPlugin() {
                 .requires { source -> source.sender.hasPermission(permissionManualUpgrade) }
                 .then(Commands.argument("epoch", WorldEpochArgumentType()).executes { ctx ->
                     val epoch = ctx.getArgument("epoch", WorldEpoch::class.java)
+
+                    nextEpochTimer?.cancel()
                     this.epoch = epoch
 
                     Command.SINGLE_SUCCESS
