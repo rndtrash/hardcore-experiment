@@ -40,7 +40,7 @@ enum class WorldEpoch(val items: List<Material>) {
         )
     ) {
         override fun getRespawnCost(epochDuration: Long): ItemStack? {
-            val days = maxOf(1, epochDuration / dayLength)
+            val days = maxOf(1, epochDuration / DAY_LENGTH)
             val count = ceil(days.toDouble().pow(1.2)).toInt()
             return ItemStack.of(Material.COPPER_INGOT, count)
         }
