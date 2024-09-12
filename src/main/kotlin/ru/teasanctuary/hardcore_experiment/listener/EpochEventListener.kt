@@ -1,6 +1,8 @@
 package ru.teasanctuary.hardcore_experiment.listener
 
+import net.kyori.adventure.text.minimessage.MiniMessage
 import org.bukkit.Material
+import org.bukkit.entity.HumanEntity
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.enchantment.EnchantItemEvent
@@ -20,7 +22,7 @@ class EpochEventListener(private val plugin: HardcoreExperiment) : Listener {
         // Предотвратим улучшение эпохи, когда оператор зачарует предмет.
         if (event.enchanter.isOp) return
 
-        plugin.allowEpoch(WorldEpoch.Obsidian)
+        tryAllowEpoch(event.enchanter, WorldEpoch.Obsidian)
     }
 
     @EventHandler
@@ -28,7 +30,7 @@ class EpochEventListener(private val plugin: HardcoreExperiment) : Listener {
         // Предотвратим улучшение эпохи, когда оператор поднимает предмет.
         if (event.player.isOp) return
 
-        checkEpoch(event.item.itemStack.type)
+        checkEpoch(event.player, event.item.itemStack.type)
     }
 
     @EventHandler
@@ -36,7 +38,7 @@ class EpochEventListener(private val plugin: HardcoreExperiment) : Listener {
         // Предотвратим улучшение эпохи, когда оператор крафтит предмет.
         if (event.whoClicked.isOp) return
 
-        checkEpoch(event.recipe.result.type)
+        checkEpoch(event.whoClicked, event.recipe.result.type)
     }
 
     @EventHandler
@@ -44,7 +46,7 @@ class EpochEventListener(private val plugin: HardcoreExperiment) : Listener {
         // Предотвратим улучшение эпохи, когда оператор забирает предмет из печи.
         if (event.player.isOp) return
 
-        checkEpoch(event.itemType)
+        checkEpoch(event.player, event.itemType)
     }
 
     @EventHandler
@@ -53,11 +55,20 @@ class EpochEventListener(private val plugin: HardcoreExperiment) : Listener {
         if (event.whoClicked.isOp) return
 
         val item = event.currentItem
-        if (item != null) checkEpoch(item.type)
+        if (item != null) checkEpoch(event.whoClicked, item.type)
     }
 
-    private fun checkEpoch(material: Material) {
-        val epoch = WorldEpoch.itemToEpoch[material]
-        if (epoch != null) plugin.allowEpoch(epoch)
+    private fun checkEpoch(caller: HumanEntity, material: Material) {
+        val epoch = WorldEpoch.itemToEpoch[material] ?: return
+
+        tryAllowEpoch(caller, epoch)
+    }
+
+    private fun tryAllowEpoch(caller: HumanEntity, epoch: WorldEpoch) {
+        val isFirstToOpenEpoch = plugin.allowEpoch(epoch)
+        if (isFirstToOpenEpoch) plugin.notifyAdmins(
+            MiniMessage.miniMessage()
+                .deserialize("Игрок <#5555ff>${caller.name}</#5555ff> открыл эпоху <u>${epoch.name}</u>.")
+        )
     }
 }

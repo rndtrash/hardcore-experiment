@@ -5,12 +5,11 @@ import io.papermc.paper.command.brigadier.Commands
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes
 import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents
+import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.minimessage.MiniMessage
-import org.bukkit.Bukkit
-import org.bukkit.GameMode
-import org.bukkit.Location
-import org.bukkit.NamespacedKey
-import org.bukkit.World
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+import org.bukkit.*
+import org.bukkit.block.Chest
 import org.bukkit.command.CommandSender
 import org.bukkit.configuration.serialization.ConfigurationSerialization
 import org.bukkit.entity.Player
@@ -23,10 +22,7 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
 import ru.teasanctuary.hardcore_experiment.config.HardcoreExperimentConfig
-import ru.teasanctuary.hardcore_experiment.listener.EpochEventListener
-import ru.teasanctuary.hardcore_experiment.listener.JoinEventListener
-import ru.teasanctuary.hardcore_experiment.listener.MortisEventListener
-import ru.teasanctuary.hardcore_experiment.listener.WorldEventListener
+import ru.teasanctuary.hardcore_experiment.listener.*
 import ru.teasanctuary.hardcore_experiment.types.*
 import ru.teasanctuary.hardcore_experiment.types.PlayerStateChangeRequest
 import java.util.*
@@ -96,6 +92,11 @@ class HardcoreExperiment : JavaPlugin() {
     private val permissionResurrect = Permission("hardcore_experiment.resurrect", PermissionDefault.OP)
 
     private var _epoch: WorldEpoch = WorldEpoch.Coal
+    /**
+     * Разрешение на получение внутренних уведомлений.
+     */
+    private val permissionNotifications = Permission("hardcore_experiment.notifications", PermissionDefault.OP)
+
     private var _epoch: WorldEpoch = WorldEpoch.Invalid
 
     /**
@@ -135,6 +136,14 @@ class HardcoreExperiment : JavaPlugin() {
 
     private var coalEpochTimer: BukkitTask? = null
     private var deadPlayerTimers = mutableMapOf<UUID, BukkitTask>()
+
+    /**
+     * Отправляет уведомление активным администраторам и в консоль сервера.
+     */
+    fun notifyAdmins(component: Component) {
+        Bukkit.broadcast(component, permissionNotifications.name)
+        logger.log(Level.INFO, PlainTextComponentSerializer.plainText().serialize(component))
+    }
 
     /**
      * Возвращает состояние игрока. null, если игрок ещё не играл на данном сервере.
@@ -387,11 +396,16 @@ class HardcoreExperiment : JavaPlugin() {
     /**
      * Помечает эпоху как доступную для перехода. Если эпоха в аргументе находится после текущей эпохи,
      * то текущая эпоха улучшится до тех пор, пока её следующий сосед не будет запрещён, либо пока эпохи не закончатся.
+     *
+     * Возвращает true, если эпоха до этого была запрещена к переходу, и false в противном случае.
      */
-    fun allowEpoch(epoch: WorldEpoch) {
+    fun allowEpoch(epoch: WorldEpoch): Boolean {
         val ordinal = epoch.ordinal
         val currentOrdinal = this.epoch.ordinal
-        if (ordinal <= currentOrdinal) return
+        // Пропускаем уже пройденные эпохи
+        if (ordinal <= currentOrdinal) return false
+        // Игнорируем уже разрешённые эпохи
+        if (epochBitmap[ordinal]) return false
 
         epochBitmap[ordinal] = true
 
@@ -400,6 +414,7 @@ class HardcoreExperiment : JavaPlugin() {
             nextOrdinal++
         }
         this.epoch = WorldEpoch.entries[nextOrdinal - 1]
+        return true
     }
 
     /**
@@ -507,6 +522,8 @@ class HardcoreExperiment : JavaPlugin() {
 
         Bukkit.getPluginManager().addPermission(permissionManualUpgrade)
         Bukkit.getPluginManager().addPermission(permissionResurrect)
+        Bukkit.getPluginManager().addPermission(permissionBuildAltar)
+        Bukkit.getPluginManager().addPermission(permissionNotifications)
 
         Bukkit.getPluginManager().registerEvents(JoinEventListener(this), this)
         Bukkit.getPluginManager().registerEvents(MortisEventListener(this), this)
