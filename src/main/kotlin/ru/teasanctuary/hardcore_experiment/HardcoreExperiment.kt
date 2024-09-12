@@ -130,9 +130,7 @@ class HardcoreExperiment : JavaPlugin() {
      */
     private val deadPlayers = mutableMapOf<UUID, DeadPlayerStatus>()
 
-    private var _hardcoreConfig: HardcoreExperimentConfig? = null
-    val hardcoreConfig
-        get() = _hardcoreConfig!!
+    lateinit var hardcoreConfig: HardcoreExperimentConfig
 
     private var coalEpochTimer: BukkitTask? = null
     private var deadPlayerTimers = mutableMapOf<UUID, BukkitTask>()
@@ -512,9 +510,9 @@ class HardcoreExperiment : JavaPlugin() {
     override fun onEnable() {
         saveDefaultConfig()
         ConfigurationSerialization.registerClass(HardcoreExperimentConfig::class.java)
-        _hardcoreConfig = getConfig().getSerializable(
+        hardcoreConfig = getConfig().getSerializable(
             "hardcore-experiment", HardcoreExperimentConfig::class.java, HardcoreExperimentConfig(mapOf())
-        )
+        ) ?: HardcoreExperimentConfig()
 
         _defaultWorld = Bukkit.getServer().worlds[0]
         loadWorldStorage()
