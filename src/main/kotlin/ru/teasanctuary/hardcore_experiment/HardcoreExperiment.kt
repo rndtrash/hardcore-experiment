@@ -24,7 +24,7 @@ import org.bukkit.scheduler.BukkitTask
 import ru.teasanctuary.hardcore_experiment.config.HardcoreExperimentConfig
 import ru.teasanctuary.hardcore_experiment.listener.*
 import ru.teasanctuary.hardcore_experiment.types.*
-import ru.teasanctuary.hardcore_experiment.types.PlayerStateChangeRequest
+import java.io.File
 import java.util.*
 import java.util.logging.Level
 
@@ -98,7 +98,11 @@ class HardcoreExperiment : JavaPlugin() {
      */
     private val permissionResurrect = Permission("hardcore_experiment.resurrect", PermissionDefault.OP)
 
-    private var _epoch: WorldEpoch = WorldEpoch.Coal
+    /**
+     * Разрешение на размещение алтаря через команду консоли.
+     */
+    private val permissionBuildAltar = Permission("hardcore_experiment.build_altar", PermissionDefault.OP)
+
     /**
      * Разрешение на получение внутренних уведомлений.
      */
@@ -140,6 +144,8 @@ class HardcoreExperiment : JavaPlugin() {
     private var coalEpochTimer: BukkitTask? = null
     private var nextEpochTimer: BukkitTask? = null
     private var deadPlayerTimers = mutableMapOf<UUID, BukkitTask>()
+
+    private lateinit var altar: AltarSchematic
 
     /**
      * Отправляет уведомление активным администраторам и в консоль сервера.
@@ -554,6 +560,18 @@ class HardcoreExperiment : JavaPlugin() {
         )
     }
 
+    /**
+     * Получает файл из папки настроек плагина. Копирует шаблон из ресурсов Jar-архива, если файл не найден.
+     */
+    private fun getCustomFile(path: String): File {
+        val file = File(dataFolder, path)
+        if (!file.exists()) {
+            saveResource(path, false)
+            return File(dataFolder, path)
+        }
+        return file
+    }
+
     override fun onEnable() {
         saveDefaultConfig()
         ConfigurationSerialization.registerClass(HardcoreExperimentConfig::class.java)
@@ -561,7 +579,9 @@ class HardcoreExperiment : JavaPlugin() {
             "hardcore-experiment", HardcoreExperimentConfig::class.java, HardcoreExperimentConfig(mapOf())
         ) ?: HardcoreExperimentConfig()
 
-        _defaultWorld = Bukkit.getServer().worlds[0]
+        val altarFile = getCustomFile("altar.nbt")
+        altar = AltarSchematic.fromFile(altarFile)
+
         defaultWorld = Bukkit.getServer().worlds[0]
         loadWorldStorage()
         initializeDeathTimers()
@@ -647,10 +667,57 @@ class HardcoreExperiment : JavaPlugin() {
                 // Позволим выполнить команду только живому игроку
                 source.sender is Player && getPlayerState(source.sender as Player) == PlayerState.Alive
             }.executes { ctx ->
+                val playerSelector = ctx.getArgument("player", PlayerSelectorArgumentResolver::class.java)
+                val players = playerSelector.resolve(ctx.source)
+                if (players.isEmpty()) {
+                    return@executes Command.SINGLE_SUCCESS
+                }
+
+                val player = players[0]
+                val state = getPlayerState(player)
+                if (state != PlayerState.LimitedSpectator) {
+                    if (state == PlayerState.Alive) {
+                        ctx.source.sender.sendMessage("Игрок ${player.name} не найден в списке мёртвых. Пока.")
+                    } else if (state == PlayerState.Spectator) {
+                        ctx.source.sender.sendMessage("Игрока ${player.name} уже нельзя возродить. Увы.")
+                    }
+
+                    return@executes Command.SINGLE_SUCCESS
+                }
+
                 // TODO: проверить наличие алтаря под ногами и предметов для возрождения
 
                 Command.SINGLE_SUCCESS
-            }).build(), "Список мёртвых игроков, готовых к возрождению."
+            }).build(),
+                "Получить список мёртвых игроков, готовых к возрождению. При указании имени, попытаться возродить игрока."
+            )
+
+            commands.register(Commands.literal("he-build-altar")
+                .requires { source -> source.sender is Player && source.sender.hasPermission(permissionBuildAltar) }
+                .executes { ctx ->
+                    val player = ctx.source.sender as Player
+                    val location = player.location.toBlockLocation()
+                    altar.build(location)
+
+                    Command.SINGLE_SUCCESS
+                }.build(), "Для админов: возвести алтарь"
+            )
+
+            commands.register(Commands.literal("he-verify-altar")
+                .requires { source -> source.sender is Player && source.sender.hasPermission(permissionBuildAltar) }
+                .executes { ctx ->
+                    val player = ctx.source.sender as Player
+                    val block = player.getTargetBlockExact(10)
+                    if (block == null || block.type != Material.CHEST) {
+                        ctx.source.sender.sendMessage("Вы должны смотреть на блок сундука.")
+
+                        return@executes Command.SINGLE_SUCCESS
+                    }
+                    val blockState = block.state as Chest
+                    ctx.source.sender.sendMessage(if (altar.isCorrect(blockState)) "Правильно" else "Неправильно")
+
+                    Command.SINGLE_SUCCESS
+                }.build(), "Для админов: проверить алтарь на корректность"
             )
         })
     }
