@@ -96,6 +96,7 @@ class HardcoreExperiment : JavaPlugin() {
     private val permissionResurrect = Permission("hardcore_experiment.resurrect", PermissionDefault.OP)
 
     private var _epoch: WorldEpoch = WorldEpoch.Coal
+    private var _epoch: WorldEpoch = WorldEpoch.Invalid
 
     /**
      * Текущая эпоха мира.

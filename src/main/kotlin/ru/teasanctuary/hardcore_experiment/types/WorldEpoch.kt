@@ -8,6 +8,14 @@ import kotlin.math.pow
 
 enum class WorldEpoch(val items: List<Material>) {
     /**
+     * Неинициализированная эпоха.
+     */
+    Invalid(listOf()) {
+        override fun getRespawnCost(epochDuration: Long): ItemStack? {
+            error("Эта эпоха не должна быть выбрана")
+        }
+    },
+    /**
      * Эпоха угля. Бесплатное возрождение, но длится ограниченное время.
      */
     Coal(listOf(Material.COAL, Material.COAL_BLOCK, Material.COAL_ORE)) {
@@ -159,7 +167,7 @@ enum class WorldEpoch(val items: List<Material>) {
     };
 
     companion object {
-        private val dayLength = 24000L
+        private const val DAY_LENGTH = 24000L
 
         /**
          * Таблица принадлежности каждого предмета к эпохе. Формируется автоматически на основе всех эпох.

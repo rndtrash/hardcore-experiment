@@ -18,10 +18,10 @@ class WorldEpochArgumentType : CustomArgumentType.Converted<WorldEpoch, String> 
     }
 
     override fun <S : Any?> listSuggestions(
-        context: CommandContext<S>,
-        builder: SuggestionsBuilder
+        context: CommandContext<S>, builder: SuggestionsBuilder
     ): CompletableFuture<Suggestions> {
-        WorldEpoch.entries.forEach {
+        // Опускаем самую первую "эпоху" Invalid
+        WorldEpoch.entries.drop(1).forEach {
             builder.suggest(it.name)
         }
 
