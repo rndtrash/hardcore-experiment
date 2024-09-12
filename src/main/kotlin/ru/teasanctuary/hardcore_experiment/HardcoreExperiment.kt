@@ -370,8 +370,9 @@ class HardcoreExperiment : JavaPlugin() {
         if (epoch != WorldEpoch.Coal || coalEpochTimer != null) return
 
         val nextEpoch = WorldEpoch.entries[WorldEpoch.Coal.ordinal + 1]
+        val epochDuration = defaultWorld.gameTime - epochSince
         // Таймер уже истёк, настало время следующей эпохи
-        if (defaultWorld.gameTime - epochSince >= hardcoreConfig.coalEpochUpgradeTimer * REAL_SECONDS_TO_GAME_TIME) {
+        if (epochDuration >= hardcoreConfig.coalEpochUpgradeTimer * REAL_SECONDS_TO_GAME_TIME) {
             epoch = nextEpoch
             return
         }
@@ -379,7 +380,7 @@ class HardcoreExperiment : JavaPlugin() {
         coalEpochTimer = server.scheduler.runTaskLater(this, Runnable {
             if (epoch == WorldEpoch.Coal) epoch = nextEpoch
             coalEpochTimer = null
-        }, hardcoreConfig.coalEpochUpgradeTimer * REAL_SECONDS_TO_GAME_TIME)
+        }, hardcoreConfig.coalEpochUpgradeTimer * REAL_SECONDS_TO_GAME_TIME - epochDuration)
     }
 
     /**
@@ -460,6 +461,8 @@ class HardcoreExperiment : JavaPlugin() {
      * Изменяет эпоху развития игрока, а также запоминает момент времени, в который эпоха поменялась.
      */
     private fun setWorldEpoch(world: World, epoch: WorldEpoch) {
+        if (epoch == WorldEpoch.Invalid) error("Нельзя выбирать эпоху Invalid")
+
         if (_epoch != epoch) {
             _epoch = epoch
             epochSince = world.gameTime
@@ -490,9 +493,9 @@ class HardcoreExperiment : JavaPlugin() {
      * Загружает данные из Permanent Data Container мира или инициализирует их, если необходимо.
      */
     private fun loadWorldStorage() {
-        val dataEpoch = defaultWorld.persistentDataContainer.get(nkEpoch, WorldEpochDataType())
+        val dataEpoch = defaultWorld.persistentDataContainer.getOrDefault(nkEpoch, WorldEpochDataType(), WorldEpoch.Invalid)
         // Отсутствие эпохи принимаем как признак отсутствия остальных полей.
-        if (dataEpoch == null) {
+        if (dataEpoch == WorldEpoch.Invalid) {
             epoch = WorldEpoch.Coal
 
             saveWorldStorage()
@@ -559,6 +562,7 @@ class HardcoreExperiment : JavaPlugin() {
         ) ?: HardcoreExperimentConfig()
 
         _defaultWorld = Bukkit.getServer().worlds[0]
+        defaultWorld = Bukkit.getServer().worlds[0]
         loadWorldStorage()
         initializeDeathTimers()
 
@@ -574,7 +578,7 @@ class HardcoreExperiment : JavaPlugin() {
 
         lifecycleManager.registerEventHandler(LifecycleEvents.COMMANDS, { event ->
             val commands = event.registrar()
-            commands.register(Commands.literal("he-upgrade")
+            commands.register(Commands.literal("he-epoch-set")
                 .requires { source -> source.sender.hasPermission(permissionManualUpgrade) }
                 .then(Commands.argument("epoch", WorldEpochArgumentType()).executes { ctx ->
                     val epoch = ctx.getArgument("epoch", WorldEpoch::class.java)
