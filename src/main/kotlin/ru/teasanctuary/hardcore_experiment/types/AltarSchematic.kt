@@ -98,7 +98,7 @@ data class AltarSchematic(
             }
 
             // В постройке должен быть хотя бы один сундук
-            if (chestPosition == null) TODO("chestPosition is null")
+            if (chestPosition == null) error("chestPosition is null")
 
             var transposedBlocks = blocks
             // Приводим структуру к единому формату, где сундук смотрит на юг
@@ -158,7 +158,7 @@ data class AltarSchematic(
                         }
                     }
 
-                    else -> TODO()
+                    else -> error("Unreachable")
                 }
 
                 if (isPerpendicular) size = Vec3i(size.z, size.y, size.x)
@@ -306,7 +306,7 @@ data class AltarSchematic(
             BlockFace.NORTH -> { i -> nextNorth(i) }
             BlockFace.WEST -> { i -> nextWest(i) }
             BlockFace.EAST -> { i -> nextEast(i) }
-            else -> TODO()
+            else -> error("Unreachable")
         }
         val world = chest.world
         var y = 0
