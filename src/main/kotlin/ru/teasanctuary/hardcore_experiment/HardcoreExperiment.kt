@@ -499,7 +499,8 @@ class HardcoreExperiment : JavaPlugin() {
      * Загружает данные из Permanent Data Container мира или инициализирует их, если необходимо.
      */
     private fun loadWorldStorage() {
-        val dataEpoch = defaultWorld.persistentDataContainer.getOrDefault(nkEpoch, WorldEpochDataType(), WorldEpoch.Invalid)
+        val dataEpoch =
+            defaultWorld.persistentDataContainer.getOrDefault(nkEpoch, WorldEpochDataType(), WorldEpoch.Invalid)
         // Отсутствие эпохи принимаем как признак отсутствия остальных полей.
         if (dataEpoch == WorldEpoch.Invalid) {
             epoch = WorldEpoch.Coal
@@ -696,8 +697,15 @@ class HardcoreExperiment : JavaPlugin() {
                 .requires { source -> source.sender is Player && source.sender.hasPermission(permissionBuildAltar) }
                 .executes { ctx ->
                     val player = ctx.source.sender as Player
-                    val location = player.location.toBlockLocation()
-                    altar.build(location)
+                    val result = altar.build(
+                        player.world,
+                        player.location.blockX,
+                        player.location.blockY,
+                        player.location.blockZ,
+                        player.facing
+                    )
+                    if (result) ctx.source.sender.sendMessage("Готово. Рекомендую вызвать команду ещё раз, чтобы факелы поставились правильно.")
+                    else ctx.source.sender.sendMessage("Ошибка: направь голову строго вдоль блоков, не по диагонали.")
 
                     Command.SINGLE_SUCCESS
                 }.build(), "Для админов: возвести алтарь"
@@ -714,7 +722,9 @@ class HardcoreExperiment : JavaPlugin() {
                         return@executes Command.SINGLE_SUCCESS
                     }
                     val blockState = block.state as Chest
-                    ctx.source.sender.sendMessage(if (altar.isCorrect(blockState)) "Правильно" else "Неправильно")
+                    val epochs = altar.getEpochBlocks(blockState)
+                    ctx.source.sender.sendMessage(if (epochs != null) "Правильно" else "Неправильно")
+                    if (epochs != null) ctx.source.sender.sendMessage(epochs.joinToString(" "))
 
                     Command.SINGLE_SUCCESS
                 }.build(), "Для админов: проверить алтарь на корректность"

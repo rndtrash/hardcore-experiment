@@ -2,18 +2,12 @@ package ru.teasanctuary.hardcore_experiment.types
 
 import net.minecraft.core.Direction
 import net.minecraft.core.Vec3i
-import net.minecraft.nbt.CompoundTag
-import net.minecraft.nbt.IntTag
-import net.minecraft.nbt.NbtAccounter
-import net.minecraft.nbt.NbtIo
-import net.minecraft.nbt.Tag
-import org.bukkit.Bukkit
-import org.bukkit.Location
+import net.minecraft.nbt.*
 import org.bukkit.Material
+import org.bukkit.World
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.type.Chest
 import java.io.File
-import java.util.logging.Level
 
 data class AltarSchematic(
     /**
@@ -29,7 +23,7 @@ data class AltarSchematic(
      */
     val blocks: Array<Array<Array<Material>>>,
     /**
-     * Все возможные позиции блоков эпох относительно блока сундука.
+     * Неупорядоченный массив всех возможных позиций блоков эпох относительно края структуры.
      */
     val epochBlockLocations: Array<Vec3i>
 ) {
@@ -39,6 +33,36 @@ data class AltarSchematic(
             assert(vecNbt.count() == 3)
             return Vec3i((vecNbt[0] as IntTag).asInt, (vecNbt[1] as IntTag).asInt, (vecNbt[2] as IntTag).asInt)
         }
+
+        /**
+         * Вращает вектор вокруг оси Y.
+         */
+        private fun rotate(v: Vec3i, size: Vec3i, dFrom: Direction, dTo: Direction): Vec3i {
+            val dDifference = Direction.from2DDataValue((4 + dTo.get2DDataValue() - dFrom.get2DDataValue()) % 4)
+            return when (dDifference) {
+                Direction.NORTH -> Vec3i(size.x - v.x - 1, v.y, size.z - v.z - 1)
+                Direction.WEST -> Vec3i(size.z - v.z - 1, v.y, v.x)
+                Direction.EAST -> Vec3i(v.z, v.y, size.x - v.x - 1)
+                Direction.SOUTH -> Vec3i(v.x, v.y, v.z)
+                else -> error("Unreachable")
+            }
+        }
+
+        /**
+         * Преобразовывает направление типа BlockFace в направление типа Direction.
+         *
+         * Не работает с неортогональными направлениями.
+         */
+        private fun blockFaceToDirection(facing: BlockFace): Direction = when (facing) {
+            BlockFace.NORTH -> Direction.NORTH
+            BlockFace.SOUTH -> Direction.SOUTH
+            BlockFace.WEST -> Direction.WEST
+            BlockFace.EAST -> Direction.EAST
+            else -> error("Unknown")
+        }
+
+        private fun rotate(v: Vec3i, size: Vec3i, fFrom: BlockFace, fTo: BlockFace): Vec3i =
+            rotate(v, size, blockFaceToDirection(fFrom), blockFaceToDirection(fTo))
 
         /**
          * Получить AltarSchematic из файла.
@@ -79,7 +103,7 @@ data class AltarSchematic(
             val blocks = Array(size.x) { Array(size.y) { Array(size.z) { Material.AIR } } }
 
             var chestPosition: Vec3i? = null
-            val epochLocations = Array(WorldEpoch.entries.count()) { Vec3i(0, 0, 0) }
+            val epochLocations = mutableListOf<Vec3i>()
             for (tag in blocksNbt) {
                 val compoundTag = tag as CompoundTag
                 val state = compoundTag.getInt("state")
@@ -89,7 +113,7 @@ data class AltarSchematic(
                 // Если предмет принадлежит эпохе, то записываем позицию на будущее и исключаем из постройки
                 val epoch = WorldEpoch.itemToEpoch[material]
                 if (epoch != null) {
-                    epochLocations[epoch.ordinal] = pos
+                    epochLocations.addLast(pos)
                 } else {
                     blocks[pos.x][pos.y][pos.z] = material
                     // Запоминаем позицию сундука
@@ -103,6 +127,14 @@ data class AltarSchematic(
             var transposedBlocks = blocks
             // Приводим структуру к единому формату, где сундук смотрит на юг
             if (chestDirection != Direction.SOUTH) {
+                // Меняем координаты блоков эпох местами
+                var i = 0
+                while (i < epochLocations.size) {
+                    val loc = epochLocations[i]
+                    epochLocations[i] = rotate(loc, size, chestDirection, Direction.SOUTH)
+                    i++
+                }
+
                 // Нужно ли менять размер матрицы
                 val isPerpendicular = chestDirection != Direction.NORTH
                 transposedBlocks =
@@ -164,10 +196,7 @@ data class AltarSchematic(
                 if (isPerpendicular) size = Vec3i(size.z, size.y, size.x)
             }
 
-            // Переводим координаты в относительные
-            epochLocations.map { loc -> loc.subtract(chestPosition) }
-
-            return AltarSchematic(chestPosition, size, transposedBlocks, epochLocations)
+            return AltarSchematic(chestPosition, size, transposedBlocks, epochLocations.toTypedArray())
         }
 
         private val airs = setOf(
@@ -280,10 +309,9 @@ data class AltarSchematic(
         return Vec3i(size.z - 1, i.y + 1, 0)
     }
 
-    fun isCorrect(chest: org.bukkit.block.Chest): Boolean {
+    fun getEpochBlocks(chest: org.bukkit.block.Chest): Array<Boolean>? {
         val chestData = chest.blockData as Chest
         val chestFacing = chestData.facing
-        Bukkit.getLogger().log(Level.INFO, "AltarDebug: $chestFacing")
         assert(chestFacing.isCartesian && chestFacing != BlockFace.UP && chestFacing != BlockFace.DOWN)
 
         /*
@@ -298,12 +326,17 @@ data class AltarSchematic(
            0
          */
 
-        val chestOrigin = Vec3i(chest.x, chest.y, chest.z)
-        val structureOrigin = chestOrigin.subtract(center)
+        val isPerpendicular = chestFacing == BlockFace.EAST || chestFacing == BlockFace.WEST
+        // TODO: захардкодил смещение, ибо заебало
+        val chestOrigin =
+            if (isPerpendicular) Vec3i(chest.x + 1, chest.y, chest.z - 1) else Vec3i(chest.x - 1, chest.y, chest.z + 1)
+        // Конструкция повёрнута на бок, поэтому меняем size.x и size.z местами
+        val structureCenter =
+            if (isPerpendicular) Vec3i(center.z, center.y, center.x) else Vec3i(center.x, center.y, center.z)
+        val structureOrigin = chestOrigin.subtract(structureCenter)
         var relativePos = when (chestFacing) {
             BlockFace.NORTH -> Vec3i(0, 0, 0)
             BlockFace.SOUTH -> Vec3i(size.x - 1, 0, size.z - 1)
-            // Конструкция повёрнута на бок, поэтому меняем size.x и size.z местами
             BlockFace.EAST -> Vec3i(size.z - 1, 0, 0)
             BlockFace.WEST -> Vec3i(0, 0, size.x - 1)
             else -> error("Unreachable")
@@ -315,6 +348,7 @@ data class AltarSchematic(
             BlockFace.EAST -> { i -> nextEast(i) }
             else -> error("Unreachable")
         }
+
         val world = chest.world
         var y = 0
         while (y < size.y) {
@@ -324,24 +358,12 @@ data class AltarSchematic(
                 while (x < size.x) {
                     val material = blocks[x][y][z]
 
-                    // TODO:
-                    world.getBlockAt(
-                        structureOrigin.x + relativePos.x,
-                        structureOrigin.y + relativePos.y,
-                        structureOrigin.z + relativePos.z
-                    ).type = material
-
                     val worldMaterial = world.getBlockAt(
                         structureOrigin.x + relativePos.x,
                         structureOrigin.y + relativePos.y,
                         structureOrigin.z + relativePos.z
                     ).type
-
-                    Bukkit.getLogger().log(
-                        Level.INFO,
-                        "AltarDebug: (${relativePos.toShortString()}) ($x $y $z): $material VS $worldMaterial"
-                    )
-                    if (!isMaterialEqual(material, worldMaterial)) return false
+                    if (!isMaterialEqual(material, worldMaterial)) return null
 
                     x++
                     relativePos = iterator(relativePos)
@@ -351,12 +373,45 @@ data class AltarSchematic(
             y++
         }
 
-        return true
+        val epochList = Array(WorldEpoch.entries.size - 1) { _ -> false }
+        for (ebl in epochBlockLocations) {
+            val pos = rotate(ebl, size, BlockFace.SOUTH, chestFacing)
+
+            val worldMaterial = world.getBlockAt(
+                structureOrigin.x + pos.x, structureOrigin.y + pos.y, structureOrigin.z + pos.z
+            ).type
+            val epoch = WorldEpoch.itemToEpoch[worldMaterial]
+            if (epoch != null) epochList[epoch.ordinal - 1] = true
+        }
+
+        return epochList
     }
 
-    fun build(location: Location) {
-        val world = location.world
-        val origin = Vec3i(location.x.toInt(), location.y.toInt(), location.z.toInt()).subtract(center)
+    fun build(world: World, bX: Int, bY: Int, bZ: Int, direction: BlockFace): Boolean {
+        if (!direction.isCartesian) return false
+
+        val isPerpendicular = direction == BlockFace.EAST || direction == BlockFace.WEST
+        // TODO: захардкодил смещение, ибо заебало
+        val chestOrigin = if (isPerpendicular) Vec3i(bX + 1, bY, bZ - 1) else Vec3i(bX - 1, bY, bZ + 1)
+        // Конструкция повёрнута на бок, поэтому меняем size.x и size.z местами
+        val structureCenter =
+            if (isPerpendicular) Vec3i(center.z, center.y, center.x) else Vec3i(center.x, center.y, center.z)
+        val structureOrigin = chestOrigin.subtract(structureCenter)
+        var relativePos = when (direction) {
+            BlockFace.NORTH -> Vec3i(0, 0, 0)
+            BlockFace.SOUTH -> Vec3i(size.x - 1, 0, size.z - 1)
+            BlockFace.EAST -> Vec3i(size.z - 1, 0, 0)
+            BlockFace.WEST -> Vec3i(0, 0, size.x - 1)
+            else -> error("Unreachable")
+        }
+        val iterator: (Vec3i) -> Vec3i = when (direction) {
+            BlockFace.SOUTH -> { i -> nextSouth(i) }
+            BlockFace.NORTH -> { i -> nextNorth(i) }
+            BlockFace.WEST -> { i -> nextWest(i) }
+            BlockFace.EAST -> { i -> nextEast(i) }
+            else -> error("Unreachable")
+        }
+
         var y = 0
         while (y < size.y) {
             var z = 0
@@ -364,16 +419,28 @@ data class AltarSchematic(
                 var x = 0
                 while (x < size.x) {
                     val material = blocks[x][y][z]
-                    world.getBlockAt(origin.x + x, origin.y + y, origin.z + z).type = material
+
+                    world.getBlockAt(
+                        structureOrigin.x + relativePos.x,
+                        structureOrigin.y + relativePos.y,
+                        structureOrigin.z + relativePos.z
+                    ).type = material
 
                     x++
+                    relativePos = iterator(relativePos)
                 }
                 z++
             }
             y++
         }
-        // TODO: а надо ли заново ставить сундук? Вроде бы и так ставится
-        // world.getBlockAt(location).type = Material.CHEST
+
+        val chestBlock = world.getBlockAt(bX, bY, bZ)
+        if (chestBlock.type != Material.CHEST) return false
+        val chestData = chestBlock.blockData as Chest
+        chestData.facing = direction
+        chestBlock.blockData = chestData
+
+        return true
     }
 
     override fun equals(other: Any?): Boolean {
