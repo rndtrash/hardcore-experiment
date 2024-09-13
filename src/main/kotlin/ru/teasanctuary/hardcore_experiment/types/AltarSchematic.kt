@@ -170,6 +170,9 @@ data class AltarSchematic(
             return AltarSchematic(chestPosition, size, transposedBlocks, epochLocations)
         }
 
+        private val airs = setOf(
+            Material.AIR, Material.CAVE_AIR, Material.VOID_AIR
+        )
         private val stones = setOf(
             Material.COBBLESTONE,
             Material.ANDESITE,
@@ -213,11 +216,11 @@ data class AltarSchematic(
             // Это позволит нам реже вызывать дорогие методы Set.contains()
             if (schematic == world) return true
 
-            // Разрешаем строить в пустых местах
-            if (schematic == Material.AIR) return true
-
             // Разрешаем ставить факела где угодно
             if (schematic == Material.TORCH) return true
+
+            // Разрешаем строить в пустых местах (да, есть несколько видов воздуха)
+            if (airs.contains(schematic)) return true
 
             // Разрешаем заменять виды булыжника
             if (stones.contains(schematic)) return stones.contains(world)
