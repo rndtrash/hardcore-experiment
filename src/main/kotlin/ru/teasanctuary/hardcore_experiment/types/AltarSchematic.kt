@@ -235,20 +235,9 @@ data class AltarSchematic(
     }
 
     /**
-     * Итерация сначала по +X, затем по +Z
-     */
-    private fun nextSouth(i: Vec3i): Vec3i {
-        if (i.x < size.x - 1) return Vec3i(i.x + 1, i.y, i.z)
-
-        if (i.z < size.z - 1) return Vec3i(0, i.y, i.z + 1)
-
-        return Vec3i(0, i.y + 1, 0)
-    }
-
-    /**
      * Итерация сначала по -X, затем по -Z
      */
-    private fun nextNorth(i: Vec3i): Vec3i {
+    private fun nextSouth(i: Vec3i): Vec3i {
         if (i.x > 0) return Vec3i(i.x - 1, i.y, i.z)
 
         if (i.z > 0) return Vec3i(size.x - 1, i.y, i.z - 1)
@@ -259,21 +248,42 @@ data class AltarSchematic(
     /**
      * Итерация сначала по +X, затем по +Z
      */
-    private fun nextWest(i: Vec3i): Vec3i {
-        TODO()
+    private fun nextNorth(i: Vec3i): Vec3i {
+        if (i.x < size.x - 1) return Vec3i(i.x + 1, i.y, i.z)
+
+        if (i.z < size.z - 1) return Vec3i(0, i.y, i.z + 1)
+
+        return Vec3i(0, i.y + 1, 0)
     }
 
     /**
-     * Итерация сначала по +X, затем по +Z
+     * Итерация сначала по -Z, затем по +X
+     */
+    private fun nextWest(i: Vec3i): Vec3i {
+        // Конструкция повёрнута на бок, поэтому меняем size.x и size.z местами
+        if (i.z > 0) return Vec3i(i.x, i.y, i.z - 1)
+
+        if (i.x < size.z - 1) return Vec3i(i.x + 1, i.y, size.x - 1)
+
+        return Vec3i(0, i.y + 1, size.x - 1)
+    }
+
+    /**
+     * Итерация сначала по +Z, затем по -X
      */
     private fun nextEast(i: Vec3i): Vec3i {
-        TODO()
+        // Конструкция повёрнута на бок, поэтому меняем size.x и size.z местами
+        if (i.z < size.x - 1) return Vec3i(i.x, i.y, i.z + 1)
+
+        if (i.x > 0) return Vec3i(i.x - 1, i.y, 0)
+
+        return Vec3i(size.z - 1, i.y + 1, 0)
     }
 
     fun isCorrect(chest: org.bukkit.block.Chest): Boolean {
         val chestData = chest.blockData as Chest
         val chestFacing = chestData.facing
-        Bukkit.getLogger().log(Level.INFO, "$chestFacing")
+        Bukkit.getLogger().log(Level.INFO, "AltarDebug: $chestFacing")
         assert(chestFacing.isCartesian && chestFacing != BlockFace.UP && chestFacing != BlockFace.DOWN)
 
         /*
@@ -290,19 +300,13 @@ data class AltarSchematic(
 
         val chestOrigin = Vec3i(chest.x, chest.y, chest.z)
         val structureOrigin = chestOrigin.subtract(center)
-//            when (chestFacing) {
-//                BlockFace.SOUTH -> Vec3i(center.x, center.y, center.z)
-//                BlockFace.NORTH -> Vec3i(-center.x, center.y, -center.z)
-//                BlockFace.WEST -> Vec3i(-center.z, center.y, center.x)
-//                BlockFace.EAST -> Vec3i(center.z, center.y, -center.x)
-//                else -> TODO()
-//            }
         var relativePos = when (chestFacing) {
-            BlockFace.SOUTH -> Vec3i(0, 0, 0)
-            BlockFace.NORTH -> Vec3i(size.x - 1, 0, size.z - 1)
-            BlockFace.WEST -> Vec3i(size.x - 1, 0, 0)
-            BlockFace.EAST -> Vec3i(0, 0, size.z - 1)
-            else -> TODO()
+            BlockFace.NORTH -> Vec3i(0, 0, 0)
+            BlockFace.SOUTH -> Vec3i(size.x - 1, 0, size.z - 1)
+            // Конструкция повёрнута на бок, поэтому меняем size.x и size.z местами
+            BlockFace.EAST -> Vec3i(size.z - 1, 0, 0)
+            BlockFace.WEST -> Vec3i(0, 0, size.x - 1)
+            else -> error("Unreachable")
         }
         val iterator: (Vec3i) -> Vec3i = when (chestFacing) {
             BlockFace.SOUTH -> { i -> nextSouth(i) }
@@ -314,10 +318,10 @@ data class AltarSchematic(
         val world = chest.world
         var y = 0
         while (y < size.y) {
-            var x = 0
-            while (x < size.x) {
-                var z = 0
-                while (z < size.z) {
+            var z = 0
+            while (z < size.z) {
+                var x = 0
+                while (x < size.x) {
                     val material = blocks[x][y][z]
 
                     // TODO:
@@ -334,14 +338,15 @@ data class AltarSchematic(
                     ).type
 
                     Bukkit.getLogger().log(
-                        Level.INFO, "(${relativePos.toShortString()}) ($x $y $z): $material VS $worldMaterial"
+                        Level.INFO,
+                        "AltarDebug: (${relativePos.toShortString()}) ($x $y $z): $material VS $worldMaterial"
                     )
                     if (!isMaterialEqual(material, worldMaterial)) return false
 
-                    z++
+                    x++
                     relativePos = iterator(relativePos)
                 }
-                x++
+                z++
             }
             y++
         }
@@ -354,20 +359,21 @@ data class AltarSchematic(
         val origin = Vec3i(location.x.toInt(), location.y.toInt(), location.z.toInt()).subtract(center)
         var y = 0
         while (y < size.y) {
-            var x = 0
-            while (x < size.x) {
-                var z = 0
-                while (z < size.z) {
+            var z = 0
+            while (z < size.z) {
+                var x = 0
+                while (x < size.x) {
                     val material = blocks[x][y][z]
                     world.getBlockAt(origin.x + x, origin.y + y, origin.z + z).type = material
 
-                    z++
+                    x++
                 }
-                x++
+                z++
             }
             y++
         }
-        world.getBlockAt(location).type = Material.CHEST
+        // TODO: а надо ли заново ставить сундук? Вроде бы и так ставится
+        // world.getBlockAt(location).type = Material.CHEST
     }
 
     override fun equals(other: Any?): Boolean {
