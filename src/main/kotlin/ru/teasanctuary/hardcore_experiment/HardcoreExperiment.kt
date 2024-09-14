@@ -1,6 +1,7 @@
 package ru.teasanctuary.hardcore_experiment
 
 import com.mojang.brigadier.Command
+import com.mojang.brigadier.arguments.IntegerArgumentType
 import io.papermc.paper.command.brigadier.Commands
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes
 import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver
@@ -21,12 +22,15 @@ import org.bukkit.permissions.PermissionDefault
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
+import ru.teasanctuary.hardcore_experiment.config.ConfigField
+import ru.teasanctuary.hardcore_experiment.config.ConfigFieldArgumentType
 import ru.teasanctuary.hardcore_experiment.config.HardcoreExperimentConfig
 import ru.teasanctuary.hardcore_experiment.listener.*
 import ru.teasanctuary.hardcore_experiment.types.*
 import java.io.File
 import java.util.*
 import java.util.logging.Level
+import kotlin.reflect.full.createType
 
 class HardcoreExperiment : JavaPlugin() {
     companion object {
@@ -107,6 +111,11 @@ class HardcoreExperiment : JavaPlugin() {
      * Разрешение на получение внутренних уведомлений.
      */
     private val permissionNotifications = Permission("hardcore_experiment.notifications", PermissionDefault.OP)
+
+    /**
+     * Разрешение на изменения конфигурации плагина.
+     */
+    private val permissionConfig = Permission("hardcore_experiment.config", PermissionDefault.OP)
 
     private var _epoch: WorldEpoch = WorldEpoch.Invalid
 
@@ -591,14 +600,43 @@ class HardcoreExperiment : JavaPlugin() {
         Bukkit.getPluginManager().addPermission(permissionResurrect)
         Bukkit.getPluginManager().addPermission(permissionBuildAltar)
         Bukkit.getPluginManager().addPermission(permissionNotifications)
+        Bukkit.getPluginManager().addPermission(permissionConfig)
 
         Bukkit.getPluginManager().registerEvents(JoinEventListener(this), this)
         Bukkit.getPluginManager().registerEvents(MortisEventListener(this), this)
         Bukkit.getPluginManager().registerEvents(WorldEventListener(this), this)
         Bukkit.getPluginManager().registerEvents(EpochEventListener(this), this)
 
-        lifecycleManager.registerEventHandler(LifecycleEvents.COMMANDS, { event ->
+        lifecycleManager.registerEventHandler(LifecycleEvents.COMMANDS) { event ->
             val commands = event.registrar()
+
+            commands.register(
+                Commands.literal("he-config").requires { source -> source.sender.hasPermission(permissionConfig) }.then(
+                    Commands.argument("property", ConfigFieldArgumentType())
+                        // TODO: другие типы кроме Integer
+                        .then(Commands.argument("integer", IntegerArgumentType.integer()).executes { ctx ->
+                            val property = ctx.getArgument("property", ConfigField::class.java)
+                            val value = ctx.getArgument("integer", Int::class.java)
+                            val field =
+                                HardcoreExperimentConfig.CONFIG_FIELDS.first { it.annotations.contains(property) }
+                            if (field.getter.returnType != Int::class.createType()) {
+                                ctx.source.sender.sendMessage("Данное поле имеет тип, отличный от Int. (${field.getter.returnType})")
+
+                                return@executes Command.SINGLE_SUCCESS
+                            }
+
+                            try {
+                                field.setter.call(hardcoreConfig, value)
+                                ctx.source.sender.sendMessage("Значение изменено на ${field.getter.call(hardcoreConfig)}.")
+                            } catch (exception: Exception) {
+                                ctx.source.sender.sendMessage("Возникло исключение: $exception")
+                            }
+
+                            Command.SINGLE_SUCCESS
+                        })
+                ).build(), "Изменить эпоху развития игрока вручную."
+            )
+
             commands.register(Commands.literal("he-epoch-set")
                 .requires { source -> source.sender.hasPermission(permissionManualUpgrade) }
                 .then(Commands.argument("epoch", WorldEpochArgumentType()).executes { ctx ->
@@ -729,7 +767,7 @@ class HardcoreExperiment : JavaPlugin() {
                     Command.SINGLE_SUCCESS
                 }.build(), "Для админов: проверить алтарь на корректность"
             )
-        })
+        }
     }
 
     override fun onDisable() {
