@@ -30,7 +30,7 @@ class MortisEventListener(private val plugin: HardcoreExperiment) : Listener {
         val player = event.player
         if (plugin.epoch.canRespawn()) {
             val respawnCost = plugin.epoch.getRespawnCost(plugin.defaultWorld.gameTime - plugin.epochSince)
-            if (respawnCost == null) {
+            if (respawnCost == null || respawnCost.amount > plugin.hardcoreConfig.resurrectionPriceLimit) {
                 // Воскрешение слишком дорогое, кидаем игрока в список мертвецов
                 plugin.makePlayerSpectate(player)
                 player.sendMessage(

@@ -19,7 +19,7 @@ enum class WorldEpoch(val items: List<Material>) {
      * Эпоха угля. Бесплатное возрождение, но длится ограниченное время.
      */
     Coal(listOf(Material.COAL, Material.COAL_BLOCK, Material.COAL_ORE)) {
-        override fun getRespawnCost(epochDuration: Long): ItemStack? {
+        override fun getRespawnCost(epochDuration: Long): ItemStack {
             return ItemStack.empty() // Бесплатный респаун
         }
 
@@ -39,8 +39,9 @@ enum class WorldEpoch(val items: List<Material>) {
             Material.WAXED_OXIDIZED_COPPER
         )
     ) {
-        override fun getRespawnCost(epochDuration: Long): ItemStack? {
-            val days = maxOf(1, epochDuration / DAY_LENGTH)
+        override fun getRespawnCost(epochDuration: Long): ItemStack {
+            // Цена растёт каждую минуту
+            val days = maxOf(1, epochDuration / MINUTES_TO_TICKS)
             val count = ceil(days.toDouble().pow(1.2)).toInt()
             return ItemStack.of(Material.COPPER_INGOT, count)
         }
@@ -167,7 +168,9 @@ enum class WorldEpoch(val items: List<Material>) {
     };
 
     companion object {
-        private const val DAY_LENGTH = 24000L
+        private const val SECONDS_TO_TICKS = 20L
+        private const val MINUTES_TO_TICKS = 60 * SECONDS_TO_TICKS
+        private const val DAY_LENGTH = 20 * MINUTES_TO_TICKS
 
         /**
          * Таблица принадлежности каждого предмета к эпохе. Формируется автоматически на основе всех эпох.
