@@ -309,6 +309,13 @@ data class AltarSchematic(
         return Vec3i(size.z - 1, i.y + 1, 0)
     }
 
+    /**
+     * Проверяет алтарь на корректность. Возвращает null, если он имеет неправильную форму.
+     *
+     * Возвращает массив, в котором отражено наличие или отсутствие блока эпохи под неким номером, включая Invalid.
+     *
+     * @see WorldEpoch
+     */
     fun getEpochBlocks(chest: org.bukkit.block.Chest): Array<Boolean>? {
         val chestData = chest.blockData as Chest
         val chestFacing = chestData.facing
@@ -373,7 +380,7 @@ data class AltarSchematic(
             y++
         }
 
-        val epochList = Array(WorldEpoch.entries.size - 1) { _ -> false }
+        val epochList = Array(WorldEpoch.entries.size) { _ -> false }
         for (ebl in epochBlockLocations) {
             val pos = rotate(ebl, size, BlockFace.SOUTH, chestFacing)
 
@@ -381,7 +388,7 @@ data class AltarSchematic(
                 structureOrigin.x + pos.x, structureOrigin.y + pos.y, structureOrigin.z + pos.z
             ).type
             val epoch = WorldEpoch.itemToEpoch[worldMaterial]
-            if (epoch != null) epochList[epoch.ordinal - 1] = true
+            if (epoch != null) epochList[epoch.ordinal] = true
         }
 
         return epochList
