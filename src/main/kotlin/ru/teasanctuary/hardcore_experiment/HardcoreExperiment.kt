@@ -300,11 +300,11 @@ class HardcoreExperiment : JavaPlugin() {
     /**
      * Делает игрока наблюдателем.
      */
-    fun makePlayerSpectate(player: Player) {
+    fun makePlayerSpectate(player: Player, location: Location? = null) {
         if (player.isValid) {
-            makeOnlinePlayerSpectate(player, player.world.spawnLocation)
+            makeOnlinePlayerSpectate(player, location ?: player.world.spawnLocation)
         } else {
-            makeOfflinePlayerSpectate(player.uniqueId, defaultWorld.spawnLocation)
+            makeOfflinePlayerSpectate(player.uniqueId, location ?: defaultWorld.spawnLocation)
         }
 
         removeFromDead(player.uniqueId)
@@ -313,12 +313,12 @@ class HardcoreExperiment : JavaPlugin() {
     /**
      * Делает игрока наблюдателем.
      */
-    fun makePlayerSpectate(playerId: UUID) {
+    fun makePlayerSpectate(playerId: UUID, location: Location? = null) {
         val player = Bukkit.getPlayer(playerId)
         if (player != null && player.isValid) {
-            makeOnlinePlayerSpectate(player, player.world.spawnLocation)
+            makeOnlinePlayerSpectate(player, location ?: player.world.spawnLocation)
         } else {
-            makeOfflinePlayerSpectate(playerId, defaultWorld.spawnLocation)
+            makeOfflinePlayerSpectate(playerId, location ?: defaultWorld.spawnLocation)
         }
 
         removeFromDead(playerId)
@@ -368,7 +368,9 @@ class HardcoreExperiment : JavaPlugin() {
         assert(!deadPlayerTimers.contains(playerId))
 
         deadPlayerTimers[playerId] = server.scheduler.runTaskLater(this, Runnable {
-            makePlayerSpectate(playerId)
+            val player = Bukkit.getPlayer(playerId)
+            if (player != null && player.isValid) makeOnlinePlayerSpectate(player, player.location)
+            else makePlayerSpectate(playerId)
 
             Bukkit.broadcast(
                 MiniMessage.miniMessage().deserialize(

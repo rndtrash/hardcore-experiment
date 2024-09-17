@@ -14,7 +14,6 @@ import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import ru.teasanctuary.hardcore_experiment.HardcoreExperiment
 import ru.teasanctuary.hardcore_experiment.types.PlayerState
-import java.util.logging.Level
 
 /**
  * Класс-слушатель, отвечающий за события, влияющие на состояние игрока:
@@ -54,10 +53,9 @@ class MortisEventListener(private val plugin: HardcoreExperiment) : Listener {
 
     @EventHandler
     fun onPlayerGameModeChange(event: PlayerGameModeChangeEvent) {
-        plugin.logger.log(Level.INFO, event.cause.name)
         if (event.cause == PlayerGameModeChangeEvent.Cause.COMMAND) {
             if (event.newGameMode == GameMode.SPECTATOR) plugin.makePlayerSpectate(event.player)
-            else plugin.makePlayerAlive(event.player, null)
+            else plugin.makePlayerAlive(event.player, event.player.location)
         } else if (event.cause == PlayerGameModeChangeEvent.Cause.HARDCORE_DEATH) {
             // Мы уже обрабатываем смерть игрока
             if (plugin.getPlayerState(event.player) == PlayerState.Alive) event.isCancelled = true
