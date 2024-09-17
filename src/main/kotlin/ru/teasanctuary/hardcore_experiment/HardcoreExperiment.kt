@@ -13,6 +13,8 @@ import org.bukkit.*
 import org.bukkit.block.Chest
 import org.bukkit.command.CommandSender
 import org.bukkit.configuration.serialization.ConfigurationSerialization
+import org.bukkit.entity.EntityType
+import org.bukkit.entity.Firework
 import org.bukkit.entity.Player
 import org.bukkit.event.HandlerList
 import org.bukkit.event.player.PlayerTeleportEvent
@@ -225,6 +227,14 @@ class HardcoreExperiment : JavaPlugin() {
     private fun makeOnlinePlayerAlive(player: Player, location: Location) {
         assert(player.isValid)
 
+        val previousState = getPlayerState(player)
+        if (previousState != null && previousState != PlayerState.Alive) {
+            Bukkit.broadcast(
+                MiniMessage.miniMessage().deserialize("Игрок <#55ff55>${player.name}</#55ff55> возродился!")
+            )
+            makeFireworks(location)
+        }
+
         setPlayerState(player, PlayerState.Alive)
         player.gameMode = GameMode.SURVIVAL
         player.teleport(location, PlayerTeleportEvent.TeleportCause.PLUGIN)
@@ -238,6 +248,10 @@ class HardcoreExperiment : JavaPlugin() {
         assert(player.hasPlayedBefore())
 
         playerStateChangeQueue[playerId] = PlayerStateChangeRequest(PlayerState.Alive, location)
+        Bukkit.broadcast(
+            MiniMessage.miniMessage()
+                .deserialize("Игрок <#55ff55>${player.name}</#55ff55> поставлен в очередь на возрождение.")
+        )
     }
 
     /**
@@ -260,11 +274,11 @@ class HardcoreExperiment : JavaPlugin() {
      * Делает игрока ограниченным наблюдателем (не дальше своего сундука с лутом).
      */
     fun makePlayerSpectateLimited(player: Player, location: Location) {
-        if (player.isValid) {
-            makeOnlinePlayerSpectateLimited(player, location)
-        } else {
-            makeOfflinePlayerSpectateLimited(player.uniqueId, location)
-        }
+//        if (player.isValid) {
+        makeOnlinePlayerSpectateLimited(player, location)
+//        } else {
+//            makeOfflinePlayerSpectateLimited(player.uniqueId, location)
+//        }
     }
 
     /**
@@ -369,8 +383,7 @@ class HardcoreExperiment : JavaPlugin() {
 
         deadPlayerTimers[playerId] = server.scheduler.runTaskLater(this, Runnable {
             val player = Bukkit.getPlayer(playerId)
-            if (player != null && player.isValid) makeOnlinePlayerSpectate(player, player.location)
-            else makePlayerSpectate(playerId)
+            makePlayerSpectate(playerId, if (player != null && player.isValid) player.location else null)
 
             Bukkit.broadcast(
                 MiniMessage.miniMessage().deserialize(
@@ -504,6 +517,21 @@ class HardcoreExperiment : JavaPlugin() {
         sender.sendMessage("Текущая эпоха ${epoch.name} длится ${(defaultWorld.gameTime - epochSince) / 20} секунд")
 
         return Command.SINGLE_SUCCESS
+    }
+
+    /**
+     * Запускает фейерверк по некоторым координатам.
+     */
+    private fun makeFireworks(location: Location) {
+        val firework = location.getWorld().spawnEntity(location, EntityType.FIREWORK_ROCKET) as Firework
+
+        val meta = firework.fireworkMeta
+        meta.power = 1 // 1.5 секунды полёта
+        meta.addEffect(
+            FireworkEffect.builder().with(FireworkEffect.Type.BURST).withTrail()
+                .withColor(Color.LIME, Color.WHITE, Color.YELLOW, Color.RED, Color.BLUE).flicker(true).build()
+        )
+        firework.fireworkMeta = meta
     }
 
     /**
@@ -709,25 +737,67 @@ class HardcoreExperiment : JavaPlugin() {
                 // Позволим выполнить команду только живому игроку
                 source.sender is Player && getPlayerState(source.sender as Player) == PlayerState.Alive
             }.executes { ctx ->
-                val playerSelector = ctx.getArgument("player", PlayerSelectorArgumentResolver::class.java)
-                val players = playerSelector.resolve(ctx.source)
-                if (players.isEmpty()) {
+                val callingPlayer = ctx.source.sender as Player
+                val block = callingPlayer.getTargetBlockExact(5)
+                if (block == null || block.type != Material.CHEST) {
+                    callingPlayer.sendMessage("Вы должны смотреть на блок сундука.")
+
                     return@executes Command.SINGLE_SUCCESS
                 }
 
-                val player = players[0]
-                val state = getPlayerState(player)
-                if (state != PlayerState.LimitedSpectator) {
+                val playerSelector = ctx.getArgument("player", PlayerSelectorArgumentResolver::class.java)
+                val players = playerSelector.resolve(ctx.source)
+                if (players.isEmpty()) {
+                    callingPlayer.sendMessage("Игрок не найден.")
+
+                    return@executes Command.SINGLE_SUCCESS
+                }
+
+                val resurrectedPlayer = players[0]
+                val state = getPlayerState(resurrectedPlayer)
+                val deadPlayer = deadPlayers[resurrectedPlayer.uniqueId]
+                if (state != PlayerState.LimitedSpectator || deadPlayer == null) {
                     if (state == PlayerState.Alive) {
-                        ctx.source.sender.sendMessage("Игрок ${player.name} не найден в списке мёртвых. Пока.")
+                        callingPlayer.sendMessage("Игрок ${resurrectedPlayer.name} не найден в списке мёртвых. Пока.")
                     } else if (state == PlayerState.Spectator) {
-                        ctx.source.sender.sendMessage("Игрока ${player.name} уже нельзя возродить. Увы.")
+                        callingPlayer.sendMessage("Игрока ${resurrectedPlayer.name} уже нельзя возродить. Увы.")
                     }
 
                     return@executes Command.SINGLE_SUCCESS
                 }
 
-                // TODO: проверить наличие алтаря под ногами и предметов для возрождения
+                val blockState = block.state as Chest
+                val epochs = altar.getEpochBlocks(blockState)
+                if (epochs == null) {
+                    callingPlayer.sendMessage("Алтарь имеет неправильную форму. Пожалуйста, проконсультируйтесь с гейм мастером.")
+                    return@executes Command.SINGLE_SUCCESS
+                }
+
+                val deadPlayerEpoch = deadPlayer.epoch
+                var i = deadPlayerEpoch.ordinal
+                // На алтаре должны присутствовать все блоки эпох вплоть до той эпохи, в которой умер игрок.
+                // Если все блоки не помещаются, то выбираются те, что из наиболее поздних эпох.
+                // Например, если игрок умер на третьей эпохе, но в алтарь помещаются только два блока эпохи, то
+                // на алтаре должны стоять блоки двух последних эпох.
+                while (i > WorldEpoch.Invalid.ordinal && i > deadPlayerEpoch.ordinal - altar.epochBlockLocations.size) {
+                    if (!epochs[i]) {
+                        callingPlayer.sendMessage("Алтарь не содержит блок эпохи ${WorldEpoch.entries[i].name}, возрождение невозможно.")
+                        return@executes Command.SINGLE_SUCCESS
+                    }
+
+                    i--
+                }
+
+                val cost = deadPlayer.getCost()
+                if (cost != null) {
+                    val left = blockState.blockInventory.removeItem(cost)
+                    if (left.isNotEmpty()) {
+                        callingPlayer.sendMessage("В алтаре недостаточно <lang:${cost.type.translationKey()}>, положите как минимум ${cost.amount} штук.")
+                        return@executes Command.SINGLE_SUCCESS
+                    }
+                }
+
+                makePlayerAlive(resurrectedPlayer, block.location.toCenterLocation().add(0.0, 1.0, 0.0))
 
                 Command.SINGLE_SUCCESS
             }).build(),
