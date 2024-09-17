@@ -606,6 +606,7 @@ class HardcoreExperiment : JavaPlugin() {
         Bukkit.getPluginManager().registerEvents(MortisEventListener(this), this)
         Bukkit.getPluginManager().registerEvents(WorldEventListener(this), this)
         Bukkit.getPluginManager().registerEvents(EpochEventListener(this), this)
+        Bukkit.getPluginManager().registerEvents(TotemEventListener(this), this)
 
         lifecycleManager.registerEventHandler(LifecycleEvents.COMMANDS) { event ->
             val commands = event.registrar()
